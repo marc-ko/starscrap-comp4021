@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StarScrap - Test</title>
+</head>
+
+<body>
+    <h1>Server is Running!</h1>
+    <p>If you see this, the Express server is serving static files correctly.</p>
+
+    <script>
+        // Basic WebSocket test
+        const ws = new WebSocket(`ws://${window.location.host}`);
+
+        ws.onopen = () => {
+            console.log('WebSocket connection opened');
+            ws.send(JSON.stringify({ type: 'greeting', message: 'Hello from client!' }));
+        };
+
+        ws.onmessage = (event) => {
+            console.log('Message from server: ', event.data);
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = `Server says: ${event.data}`;
+            document.body.appendChild(messageDiv);
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error: ', error);
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket connection closed');
+        };
+    </script>
+</body>
+
+</html>
