@@ -53,15 +53,19 @@
   - Ensure multiple players can join (via different browser tabs) and move around.
 
 ### Day 4 (May 5, 2025): Gameplay Page - Tasks, Traps & Meetings
-- [ ] Add scavenging and tasks:
-  - Draw interactable crates on the map; clicking gives items (e.g., laser gun, sword, health pack). Update player state via WebSocket.
-  - Add task spots (e.g., fix wire, rope horse); crewmates click to "complete" them (increment task counter via WebSocket). Tasks might appear outside the safe zone.
-- [ ] Add impostor mechanics:
-  - Impostors click near crewmates to attack (send attack action via WebSocket).
+- [x] Add scavenging and tasks:
+  --- postpone Draw interactable crates on the map; clicking gives items (e.g., laser gun, sword, health pack). Update player state via WebSocket.
+  - Add task spots (e.g., fix wire, rope horse); crewmates click to "complete" them (increment task counter via WebSocket). Tasks might appear outside the safe zone. (in task.js)
+- [x] Add impostor mechanics:
+  - Impostors click K near crewmates to attack (send attack action via WebSocket).
   - Impostors press ‘T’ to set a trap (e.g., a fake task that stuns crewmates for ~3 seconds). Send trap placement via WebSocket.
 - [ ] Add meeting system:
   - Press ‘M’ to call a meeting (pauses game, shows voting UI). Send meeting request via WebSocket.
   - Players vote to eject someone (send vote via WebSocket). Server processes votes and broadcasts ejection result.
+- [X] Add Safe Zone Circle 
+  - it shirk on count down -> send ws of the safezone countdown 
+  - make a purple circle that outside filled with 0.9 opacity of gray
+  - minise the player outside the circle 0.1% of health 
 - [ ] Test mechanics:
   - Verify tasks increment, traps stun, and meetings eject players.
 

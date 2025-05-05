@@ -37,6 +37,22 @@ const wss = new WebSocket.Server({ noServer: true });
 const connectedPlayers = new Map(); // userId -> websocket connection
 const playerData = new Map(); // userId -> player data (position, health, etc.)
 
+// Game state
+const gameState = {
+    startTime: null,
+    safeZone: {
+        centerX: 1400, // Initial safe zone center (near player start)
+        centerY: 580,
+        radius: 1250, // Initial radius
+        shrinkInterval: 30000, // Shrink every 30 seconds
+        minRadius: 100, // Minimum size
+        shrinkAmount: 150, // How much to shrink each time
+        nextShrinkTime: 0, // When the next shrink will happen
+        damageInterval: 1000, // Apply damage every second
+        damageAmount: 1 // Damage percent per tick
+    }
+};
+
 server.on('upgrade', (request, socket, head) => {
   console.log('Parsing session from request...');
   sessionParser(request, {}, () => {
@@ -84,6 +100,8 @@ function broadcastPlayerData(sourceUserId) {
             id: sourceUserId
         }
     });
+
+    console.log("broadcasting player data to all clients", message);
 
     // Send to all clients
     connectedPlayers.forEach((client) => {
@@ -165,6 +183,101 @@ function handlePlayerDisconnect(userId) {
     broadcastPlayerCount();
 }
 
+// Start safe zone shrinking process
+function startSafeZoneShrinking() {
+    // Set interval to check and shrink safe zone
+    setInterval(() => {
+        const currentTime = Date.now();
+        
+        // Check if it's time to shrink the safe zone
+        if (currentTime >= gameState.safeZone.nextShrinkTime && 
+            gameState.safeZone.radius > gameState.safeZone.minRadius) {
+            
+            // Shrink the safe zone
+            gameState.safeZone.radius = Math.max(
+                gameState.safeZone.minRadius,
+                gameState.safeZone.radius - gameState.safeZone.shrinkAmount
+            );
+            
+            // Set next shrink time
+            gameState.safeZone.nextShrinkTime = currentTime + gameState.safeZone.shrinkInterval;
+            
+            console.log(`Safe zone shrunk to ${gameState.safeZone.radius}. Next shrink at ${new Date(gameState.safeZone.nextShrinkTime).toISOString()}`);
+            
+            // Broadcast safe zone update to all clients
+            broadcastSafeZone();
+        }
+        
+        // Apply damage to players outside safe zone
+        applyOutOfBoundsDamage();
+        
+    }, 1000); // Check every second
+}
+
+// Apply damage to players outside the safe zone
+function applyOutOfBoundsDamage() {
+    playerData.forEach((player, userId) => {
+        // Skip if player is already dead
+        if (player.isAlive === false) return;
+        
+        // Calculate distance from safe zone center
+        const dx = player.x - gameState.safeZone.centerX;
+        const dy = player.y - gameState.safeZone.centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // If player is outside safe zone, apply damage
+        if (distance > gameState.safeZone.radius) {
+            player.health = Math.max(0, player.health - gameState.safeZone.damageAmount);
+            
+            // If player's health drops to 0, mark as dead
+            if (player.health <= 0) {
+                player.isAlive = false;
+                player.deathTime = Date.now();
+                player.deathX = player.x;
+                player.deathY = player.y;
+                
+                // Broadcast death due to safe zone
+                const deathMessage = JSON.stringify({
+                    type: 'player_kill',
+                    victim: userId,
+                    killerId: 'safe_zone',
+                    x: player.x,
+                    y: player.y,
+                    cause: 'safe_zone'
+                });
+                
+                connectedPlayers.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(deathMessage);
+                    }
+                });
+            }
+            
+            // Broadcast updated player data
+            broadcastPlayerData(userId);
+        }
+    });
+}
+
+// Broadcast safe zone data to all clients
+function broadcastSafeZone() {
+    const timeUntilNextShrink = Math.max(0, gameState.safeZone.nextShrinkTime - Date.now());
+    const safeZoneMessage = JSON.stringify({
+        type: 'safe_zone_update',
+        centerX: gameState.safeZone.centerX,
+        centerY: gameState.safeZone.centerY,
+        radius: gameState.safeZone.radius,
+        nextShrinkTime: gameState.safeZone.nextShrinkTime,
+        timeUntilNextShrink: timeUntilNextShrink
+    });
+    
+    connectedPlayers.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(safeZoneMessage);
+        }
+    });
+}
+
 // Handle WebSocket connections
 wss.on('connection', (ws, request) => {
     const userId = request.session.userId;
@@ -175,6 +288,17 @@ wss.on('connection', (ws, request) => {
     
     // Add player to our tracking map
     connectedPlayers.set(userId, ws);
+    
+    // Initialize game start time if this is the first player
+    if (gameState.startTime === null && connectedPlayers.size === 1) {
+        gameState.startTime = Date.now();
+        gameState.safeZone.nextShrinkTime = gameState.startTime + gameState.safeZone.shrinkInterval;
+        console.log(`Game started at ${new Date(gameState.startTime).toISOString()}`);
+        console.log(`First safe zone shrink at ${new Date(gameState.safeZone.nextShrinkTime).toISOString()}`);
+        
+        // Set up safe zone shrinking interval
+        startSafeZoneShrinking();
+    }
     
     // Initialize player data with default values
     playerData.set(userId, {
@@ -194,7 +318,9 @@ wss.on('connection', (ws, request) => {
         type: 'welcome', 
         message: `Welcome ${userId}!`,
         playerId: userId,
-        role: playerData.get(userId).role
+        role: playerData.get(userId).role,
+        gameStartTime: gameState.startTime,
+        serverTime: Date.now()
     }));
     
     // Send initial player count to the new player
@@ -202,6 +328,18 @@ wss.on('connection', (ws, request) => {
         type: 'player_count', 
         count: connectedPlayers.size 
     }));
+    
+    // Send safe zone data to the new player
+    if (gameState.startTime !== null) {
+        ws.send(JSON.stringify({
+            type: 'safe_zone_update',
+            centerX: gameState.safeZone.centerX,
+            centerY: gameState.safeZone.centerY,
+            radius: gameState.safeZone.radius,
+            nextShrinkTime: gameState.safeZone.nextShrinkTime,
+            timeUntilNextShrink: Math.max(0, gameState.safeZone.nextShrinkTime - Date.now())
+        }));
+    }
     
     // Send existing players to the new player
     sendExistingPlayersTo(userId);
@@ -213,7 +351,7 @@ wss.on('connection', (ws, request) => {
         try {
             const data = JSON.parse(message);
 
-            console.log("received message",data);
+            // console.log("received message",data);
             
             // Handle different message types
             switch (data.type) {
@@ -249,6 +387,56 @@ wss.on('connection', (ws, request) => {
                         // Broadcast the update to all clients
                         broadcastPlayerData(userId);
                     }
+                    break;
+                
+                case 'task_completed':
+                    // Handle task completion
+                    console.log(`Player ${userId} completed task: ${data.taskId}`);
+                    
+                    // Broadcast task completion to all clients
+                    const taskMessage = JSON.stringify({
+                        type: 'task_completed',
+                        taskId: data.taskId,
+                        playerId: userId
+                    });
+                    
+                    connectedPlayers.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(taskMessage);
+                        }
+                    });
+                    break;
+                    
+                case 'player_kill':
+                    // Handle player kill
+                    console.log(`Player ${userId} killed player ${data.victim}`);
+                    
+                    // Update the victim's data to mark as dead
+                    if (playerData.has(data.victim)) {
+                        const victimData = playerData.get(data.victim);
+                        victimData.isAlive = false;
+                        victimData.deathTime = Date.now();
+                        victimData.deathX = data.x;
+                        victimData.deathY = data.y;
+                        
+                        // Save updated player data
+                        playerData.set(data.victim, victimData);
+                    }
+                    
+                    // Broadcast the kill to all clients
+                    const killMessage = JSON.stringify({
+                        type: 'player_kill',
+                        victim: data.victim,
+                        killerId: userId,
+                        x: data.x,
+                        y: data.y
+                    });
+                    
+                    connectedPlayers.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(killMessage);
+                        }
+                    });
                     break;
                     
                 default:

@@ -31,8 +31,14 @@ const Player = {
         frameInterval: 1.5,
         direction: 'down',
         isMoving: false,
+        isAlive: true,
         lastUpdated: Date.now(),
         id: null, // Will store the server-assigned player ID
+        isDead: false,
+        deathTime: null,
+        deathX: 0,
+        deathY: 0,
+        lastKillTime: 0
     },
     
     // Other players in the game (for multiplayer)
@@ -76,9 +82,23 @@ const Player = {
         
         return this.properties;
     },
+
+     // Update the health UI
+    updateHealthUI: function() {
+        const healthElement = document.getElementById('health-indicator');
+        if (healthElement) {
+            healthElement.textContent = `Health: ${this.properties.health}`;
+        }
+    },
+    
     
     // Update player position based on controls
     update: function(controls, boundaryCheck) {
+        // If player is dead, they can't move
+        if (!this.properties.isAlive) {
+            return false;
+        }
+        
         let isMoving = false;
         let newX = this.properties.x;
         let newY = this.properties.y;
@@ -149,16 +169,16 @@ const Player = {
     // Render player
     render: function(ctx, playerSprite, cameraX, cameraY) {
         try {
-            // First render the local player
+            // ** LOCAL PLAYER **
             if (this.properties && typeof this.properties.x === 'number') {
                 this.renderPlayer(ctx, playerSprite, this.properties, cameraX, cameraY);
             } else {
                 console.error("Local player properties invalid:", this.properties);
             }
             
-            // Then render all other players
+            // ** OTHER PLAYERS **
             if (this.otherPlayers && this.otherPlayers.size > 0) {
-                console.log(`Rendering ${this.otherPlayers.size} other players`);
+                // console.log(`Rendering ${this.otherPlayers.size} other players`);
                 this.otherPlayers.forEach((player, id) => {
                     if (player && typeof player.x === 'number') {
                         this.renderPlayer(ctx, playerSprite, player, cameraX, cameraY);
@@ -192,10 +212,58 @@ const Player = {
             frameX: player.frameX || 10,
             direction: player.direction || 'down',
             role: player.role || 'crewmate',
-            id: player.id || null
+            id: player.id || null,
+            isAlive: player.isAlive !== false, // Default to alive unless explicitly set to false
+            deathX: player.deathX || 0,
+            deathY: player.deathY || 0
         };
         
         ctx.save();
+        
+        // If player is dead, render the dead body sprite instead
+        if (!safePlayer.isAlive) {
+            if (StarScrap && StarScrap.state && StarScrap.state.assets && StarScrap.state.assets.deadBodySprite && StarScrap.state.assets.deadBodySprite.complete) {
+                // Draw dead body sprite
+                const deadBodySprite = StarScrap.state.assets.deadBodySprite;
+                
+                // For dead bodies, use the death position
+                const deadX = safePlayer.deathX || safePlayer.x;
+                const deadY = safePlayer.deathY || safePlayer.y;
+                
+                // Calculate animation frame based on time since death
+                let deadFrameX = 0;
+                if (player.deathTime) {
+                    const timeSinceDeath = Date.now() - player.deathTime;
+                    // Animation cycle: 8 frames at 200ms per frame
+                    deadFrameX = Math.min(7, Math.floor(timeSinceDeath / 200) % 8);
+                }
+                
+                // Determine if we should draw the final frame (dead body) or animation
+                const isAnimationComplete = player.deathTime && (Date.now() - player.deathTime) > 1600; // 8 frames * 200ms
+                const frameX = isAnimationComplete ? 7 : deadFrameX; // Use last frame if animation complete
+                
+                // Draw dead body
+                ctx.drawImage(
+                    deadBodySprite,
+                    frameX * PLAYER_SPRITE_WIDTH, 0,
+                    PLAYER_SPRITE_WIDTH, PLAYER_SPRITE_HEIGHT,
+                    deadX - cameraX, deadY - cameraY,
+                    safePlayer.width, safePlayer.height
+                );
+                
+                // Draw player ID above the dead body
+                if (safePlayer.id) {
+                    ctx.font = '10px Arial';
+                    ctx.fillStyle = 'red';
+                    ctx.fillText(`${safePlayer.id.substring(24, 30)} (DEAD)`, 
+                        deadX - cameraX, 
+                        deadY - cameraY - 3);
+                }
+                
+                ctx.restore();
+                return;
+            }
+        }
         
         // Apply tint for impostors (red) or crewmates (blue) ONLY for the local player
         if (safePlayer.id === this.properties.id) {
@@ -311,7 +379,7 @@ const Player = {
     // Sync player data to server
     syncToServer: function(socket) {
         if (socket && socket.readyState === WebSocket.OPEN) {
-            console.log("syncing to server");
+            // console.log("syncing to server");
             socket.send(JSON.stringify({
                 type: 'player_update',
                 player: {
@@ -324,7 +392,11 @@ const Player = {
                     frameX: this.properties.frameX,
                     isMoving: this.properties.isMoving,
                     health: this.properties.health,
-                    role: this.properties.role
+                    role: this.properties.role,
+                    isAlive: this.properties.isAlive,
+                    deathTime: this.properties.deathTime,
+                    deathX: this.properties.deathX,
+                    deathY: this.properties.deathY
                 }
             }));
         }
@@ -332,7 +404,7 @@ const Player = {
     
     // Handle player update from server
     handlePlayerUpdate: function(playerData) {
-        console.log("Handling player update:", playerData);
+        // console.log("Handling player update:", playerData);
         
         // Make sure we have valid data with an ID
         if (!playerData || !playerData.id) {
@@ -342,12 +414,14 @@ const Player = {
         
         // If this is for the local player, ignore
         if (playerData.id === this.properties.id) {
-            console.log("Ignoring update for local player");
+            this.properties.health = playerData.health;
+            this.properties.isAlive = playerData.isAlive;
+            this.properties.deathTime = playerData.deathTime;
             return;
         }
 
         
-        console.log("playerData",playerData);
+        // console.log("playerData",playerData);
         
         // Ensure required properties
         const updatedPlayer = {
@@ -371,9 +445,9 @@ const Player = {
         }
         
         // console.log("Current other players count:", this.otherPlayers.size);
-        this.otherPlayers.forEach((player, id) => {
-            console.log(`- Player ${id} at position ${player.x},${player.y}`);
-        });
+        // this.otherPlayers.forEach((player, id) => {
+        //     console.log(`- Player ${id} at position ${player.x},${player.y}`);
+        // });
     },
     
     // Remove disconnected player
@@ -383,5 +457,94 @@ const Player = {
             return true;
         }
         return false;
+    },
+    
+    // Try to kill another player
+    tryKill: function() {
+        // Check if player is impostor
+        // if (this.properties.role !== 'impostor') {
+        //     console.log('Only impostors can kill');
+        //     return false;
+        // }
+
+        if(this.properties.lastKillTime && Date.now() - this.properties.lastKillTime < 30000){
+            alert('You must wait 30 seconds before you can kill again');
+            return false;
+        }
+        
+        // Check if 1 minute has passed since game start
+        if (StarScrap && StarScrap.state && StarScrap.state.gameStartTime) {
+            const gameTimeElapsed = Date.now() - StarScrap.state.gameStartTime;
+            if (gameTimeElapsed < 60000) { // 60000ms = 1 minute
+                alert('Killing is not available yet. Wait for 1 minute after game start.');
+                return false;
+            }
+        }
+        
+        // Check for nearby players to kill
+        let nearestVictim = null;
+        let nearestDistance = 100; // Maximum kill distance (100 pixels)
+        
+        const killerX = this.properties.x + this.properties.width / 2;
+        const killerY = this.properties.y + this.properties.height / 2;
+        
+        this.otherPlayers.forEach((player, id) => {
+            // Skip if player is already dead
+            if (!player.isAlive) return;
+            
+            const victimX = player.x + player.width / 2;
+            const victimY = player.y + player.height / 2;
+            
+            const distance = Math.sqrt(
+                Math.pow(killerX - victimX, 2) + 
+                Math.pow(killerY - victimY, 2)
+            );
+            
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestVictim = { id, player };
+            }
+        });
+        
+        if (nearestVictim) {
+            // Perform the kill
+            console.log(`Killing player ${nearestVictim.id}`);
+            
+            // Update the player's state locally
+            nearestVictim.player.isAlive = false;
+            nearestVictim.player.deathTime = Date.now();
+            nearestVictim.player.deathX = nearestVictim.player.x;
+            nearestVictim.player.deathY = nearestVictim.player.y;
+            
+            // Record the kill time
+            this.properties.lastKillTime = Date.now();
+            
+            // Send kill event to server
+            if (StarScrap && StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+                StarScrap.socket.send(JSON.stringify({
+                    type: 'player_kill',
+                    victim: nearestVictim.id,
+                    killerId: this.properties.id,
+                    x: nearestVictim.player.x,
+                    y: nearestVictim.player.y
+                }));
+            }
+            
+            return true;
+        }
+        
+        console.log('No players within kill range');
+        return false;
+    },
+    
+    // Handle player being killed
+    handleBeingKilled: function() {
+        this.properties.isAlive = false;
+        this.properties.deathTime = Date.now();
+        this.properties.deathX = this.properties.x;
+        this.properties.deathY = this.properties.y;
+        
+        // Disable movement
+        this.properties.speed = 0;
     }
 };

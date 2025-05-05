@@ -9,18 +9,29 @@ const StarScrap = {
     // Game state
     state: {
         isGameStarted: false,
+        gameStartTime: null,
         players: [],
         currentPlayer: null,
         gameMap: null,
-        safeZone: null,
+        safeZone: {
+            centerX: 1400,
+            centerY: 580,
+            radius: 1250,
+            nextShrinkTime: 0,
+            timeUntilNextShrink: 0
+        },
         playerCount: 0,
         sessionId: null,
         canvas: null,
         ctx: null,
         gameLoop: null,
+        taskUIActive: false,
         assets: {
             shipMap: null,
-            playerSprite: null
+            playerSprite: null,
+            deadBodySprite: null,
+            itemSprite: null
+
         },
         controls: {
             up: false,
@@ -115,9 +126,15 @@ const StarScrap = {
             <div id="timer">05:00</div>
             <div id="task-progress">Tasks: 0/5</div>
             <div id="safe-zone-indicator">Safe Zone: Shrinking in 30s</div>
+            <div id="health-indicator">Health: 100</div>
+            <div id="tips-container">Tips: </div>
         `;
         uiElement.style.display = 'none'; // Hide until loaded
         container.appendChild(uiElement);
+
+        setTimeout(() => {
+            $('#tips-container').fadeOut(1000);
+        }, 5000);
         
         this.state.canvas = canvas;
         this.state.ctx = canvas.getContext('2d');
@@ -125,6 +142,7 @@ const StarScrap = {
         // Load assets
         this.state.assets.shipMap = this.loader.loadImage('assets/ship.png');
         this.state.assets.playerSprite = this.loader.loadImage('assets/player.png');
+        this.state.assets.deadBodySprite = this.loader.loadImage('assets/deadbody.png');
         
         return true;
     },
@@ -149,6 +167,14 @@ const StarScrap = {
             height: this.state.canvas.height
         };
         
+        // Note: Player will be initialized when the welcome message is received from the server
+        // We don't initialize the player here anymore to avoid conflicts
+        
+        // Initialize task system
+        if (typeof Tasks !== 'undefined') {
+            Tasks.init();
+        }
+        
         // Set up input handlers
         this.setupGameControls();
         
@@ -171,6 +197,23 @@ const StarScrap = {
                     break;
                 case 'd': case 'D': case 'ArrowRight':
                     this.state.controls.right = true;
+                    break;
+                case 'e': case 'E':
+                    // Try to interact with a nearby task
+                    if (typeof Tasks !== 'undefined' && !this.state.taskUIActive) {
+                        Tasks.interactWithNearbyTask();
+                    }
+                    break;
+                case 'k': case 'K':
+                    // Try to kill a nearby player (impostor only)
+                    if (typeof Player !== 'undefined' && !this.state.taskUIActive && 
+                        Player.properties) {
+                        
+                        const killed = Player.tryKill();
+                        if (killed) {
+                            console.log('Player killed successfully!');
+                        }
+                    }
                     break;
                 case 'm': case 'M':
                     console.log('Meeting called!'); // Will implement later
@@ -234,6 +277,7 @@ const StarScrap = {
         // Sync with server if needed
         if (shouldSync && this.socket && this.socket.readyState === WebSocket.OPEN) {
             Player.syncToServer(this.socket);
+            Player.updateHealthUI();
         }
         
         // Update camera to follow player
@@ -274,6 +318,9 @@ const StarScrap = {
             0, 0, camera.width, camera.height
         );
         
+        // Draw safe zone circle
+        StarScrap.renderSafeZone(ctx, camera);
+        
         // Debug: Draw map boundaries if enabled
         if (this.state.debug.enabled && this.state.debug.showBoundaries && typeof MapBound !== 'undefined') {
             if (typeof MapBound.drawDebugBoundaries === 'function') {
@@ -281,21 +328,80 @@ const StarScrap = {
             }
         }
         
+        // Draw tasks on the map
+        if (typeof Tasks !== 'undefined' && !this.state.taskUIActive) {
+            Tasks.renderTasks(ctx, camera.x, camera.y);
+        }
+        
         // Draw player using the Player module if available
         Player.render(ctx, this.state.assets.playerSprite, camera.x, camera.y);
+    },
+    
+    // Render the safe zone
+    renderSafeZone: function(ctx, camera) {
+        // Only render if we have valid data
+        if (!StarScrap.state.safeZone || !StarScrap.state.safeZone.radius) return;
+        
+        const safeZone = StarScrap.state.safeZone;
+        
+        // Calculate safe zone position relative to camera
+        const screenX = safeZone.centerX - camera.x;
+        const screenY = safeZone.centerY - camera.y;
+        
+        // Draw the gray area outside the safe zone (covering the entire view)
+        ctx.save();
+        
+        // Create a clipping path for the area outside the safe zone
+        ctx.beginPath();
+        ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height); // Entire canvas
+        ctx.arc(screenX, screenY, safeZone.radius, 0, Math.PI * 2, true); // Remove circle
+        ctx.clip();
+        
+        // Fill the outside area with semi-transparent gray
+        ctx.fillStyle = 'rgba(50, 50, 70, 0.5)';
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        
+        ctx.restore();
+        
+        // Draw the purple border of the safe zone
+        ctx.save();
+        ctx.strokeStyle = 'rgba(128, 0, 128, 0.8)'; // Purple
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, safeZone.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        
+        // Update safe zone countdown indicator
+        if (StarScrap.state.gameStartTime) {
+            // Update the countdown based on real-time
+            const safeZoneIndicator = document.getElementById('safe-zone-indicator');
+            if (safeZoneIndicator) {
+                const timeLeftInSeconds = Math.max(0, Math.floor((safeZone.nextShrinkTime - Date.now()) / 1000));
+                safeZoneIndicator.textContent = `Safe Zone: Shrinking in ${timeLeftInSeconds}s`;
+            }
+        }
     },
     
     // Game loop
     gameLoop: function() {
         StarScrap.updatePlayer();
+        
+        // Update game timer display
+        if (StarScrap.state.gameStartTime) {
+            const gameElapsedTime = Date.now() - StarScrap.state.gameStartTime;
+            const minutes = String(Math.floor(gameElapsedTime / 60000)).padStart(2, '0');
+            const seconds = String(Math.floor((gameElapsedTime % 60000) / 1000)).padStart(2, '0');
+            $('#timer').text(`${minutes}:${seconds}`);
+        }
+        
         StarScrap.render();
         requestAnimationFrame(StarScrap.gameLoop);
     },
-    
     // Start the game loop
     startGameLoop: function() {
         console.log('Starting game loop...');
-        this.gameLoop();
+        StarScrap.gameLoop();
     },
     
     // WebSocket connection
@@ -342,6 +448,20 @@ const StarScrap = {
                     case 'welcome':
                         console.log('Welcome message received:', data);
                         
+                        // Set game start time from server
+                        if (data.gameStartTime) {
+                            // Calculate time offset between server and client
+                            const serverTimeOffset = Date.now() - data.serverTime;
+                            console.log(`Server time offset: ${serverTimeOffset}ms`);
+                            
+                            // Adjust game start time based on server time
+                            this.state.gameStartTime = data.gameStartTime + serverTimeOffset;
+                            console.log(`Game started at: ${new Date(this.state.gameStartTime).toISOString()}`);
+                        } else {
+                            // Fallback to local time if server doesn't provide start time
+                            this.state.gameStartTime = Date.now();
+                        }
+                        
                         // Initialize player with role and ID from server
                         if (typeof Player !== 'undefined') {
                             // Initialize the player with server-provided role and ID
@@ -354,12 +474,24 @@ const StarScrap = {
                             // Show player info in UI
                             const playerName = document.getElementById('player-name');
                             if (playerName) {
-                                playerName.textContent = data.playerId.substring(24, 30);
+                                playerName.textContent = 'Player Name: ' + data.playerId.substring(24, 30);
                             }
                             
                             const playerRole = document.getElementById('player-role');
                             if (playerRole) {
-                                playerRole.textContent = data.role;
+                                playerRole.textContent = 'Your Role is a ' + data.role;
+                                console.log('Player role:', data.role);
+                                if (data.role.trim() === 'crewmate') {
+                                    const tips = document.getElementById('tips-container');
+                                    if (tips) {
+                                        tips.textContent = 'You are a crewmate, your goal is to finish all the tasks before the impostor kills you.(even try to kill the impostor)';
+                                    }
+                                } else {
+                                    const tips = document.getElementById('tips-container');
+                                    if (tips) {
+                                        tips.textContent = 'You are an impostor, your goal is to kill all the crewmates before they finish all the tasks.(even try to kill the crewmate who is doing the task)';
+                                    }
+                                }
                             }
                             
                             // We need to ensure our position is sent to the server multiple times
@@ -389,11 +521,79 @@ const StarScrap = {
                         // Handle player update from another client
                         Player.handlePlayerUpdate(data.player);
                         break;
-                    
                     case 'player_disconnect':
                         // Remove disconnected player
                         if (typeof Player !== 'undefined' && data.playerId) {
                             Player.removePlayer(data.playerId);
+                        }
+                        break;
+                        
+                    case 'safe_zone_update':
+                        // Update safe zone data
+                        console.log('Safe zone update received:', data);
+                        this.state.safeZone.centerX = data.centerX;
+                        this.state.safeZone.centerY = data.centerY;
+                        this.state.safeZone.radius = data.radius;
+                        this.state.safeZone.nextShrinkTime = data.nextShrinkTime;
+                        this.state.safeZone.timeUntilNextShrink = data.timeUntilNextShrink;
+                        
+                        // Update safe zone indicator in UI
+                        const safeZoneIndicator = document.getElementById('safe-zone-indicator');
+                        if (safeZoneIndicator) {
+                            const timeLeftInSeconds = Math.floor(this.state.safeZone.timeUntilNextShrink / 1000);
+                            safeZoneIndicator.textContent = `Safe Zone: Shrinking in ${timeLeftInSeconds}s`;
+                        }
+                        break;
+                        
+                    case 'player_kill':
+                        // Handle player kill
+                        console.log('Player kill message received:', data);
+                        
+                        // If I am the victim, handle being killed
+                        if (data.victim === Player.properties.id) {
+                            Player.handleBeingKilled();
+                            
+                            // Show death message
+                            const deathMessage = document.createElement('div');
+                            deathMessage.id = 'death-message';
+                            deathMessage.style.position = 'absolute';
+                            deathMessage.style.top = '50%';
+                            deathMessage.style.left = '50%';
+                            deathMessage.style.transform = 'translate(-50%, -50%)';
+                            deathMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                            deathMessage.style.color = 'red';
+                            deathMessage.style.padding = '20px';
+                            deathMessage.style.borderRadius = '10px';
+                            deathMessage.style.fontSize = '24px';
+                            deathMessage.style.fontWeight = 'bold';
+                            deathMessage.style.zIndex = '1000';
+                            
+                            // Different message based on death cause
+                            if (data.killerId === 'safe_zone') {
+                                deathMessage.textContent = 'You died outside the safe zone!';
+                            } else {
+                                deathMessage.textContent = 'You were killed by a mate!';
+                            }
+                            
+                            document.body.appendChild(deathMessage);
+                            
+                            // // Remove death message after 3 seconds
+                            // setTimeout(() => {
+                            //     if (deathMessage && deathMessage.parentNode) {
+                            //         deathMessage.parentNode.removeChild(deathMessage);
+                            //     }
+                            // }, 3000);
+                        }
+                        
+                        // If another player died, update their state
+                        else if (Player.otherPlayers.has(data.victim)) {
+                            const killedPlayer = Player.otherPlayers.get(data.victim);
+                            if (killedPlayer) {
+                                killedPlayer.isAlive = false;
+                                killedPlayer.deathTime = Date.now();
+                                killedPlayer.deathX = data.x || killedPlayer.x;
+                                killedPlayer.deathY = data.y || killedPlayer.y;
+                            }
                         }
                         break;
                         
@@ -478,7 +678,7 @@ const StarScrap = {
     
     // Start sending periodic position updates
     startPeriodicSync: function() {
-        console.log("Starting periodic position sync");
+        // console.log("Starting periodic position sync");
         
         // Clear any existing interval
         if (this.syncInterval) {
@@ -496,6 +696,19 @@ const StarScrap = {
                 Player.syncToServer(this.socket);
             }
         }, 200);
+    },
+    
+    // Set task UI active state
+    setTaskUIActive: function(active) {
+        this.state.taskUIActive = active;
+        
+        // Disable controls when task UI is active
+        if (active) {
+            this.state.controls.up = false;
+            this.state.controls.down = false;
+            this.state.controls.left = false;
+            this.state.controls.right = false;
+        }
     }
 };
 
