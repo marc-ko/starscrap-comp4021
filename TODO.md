@@ -23,32 +23,33 @@
   - Access `http://localhost:8000` to confirm it serves a basic HTML file.
 
 ### Front Page & Basic Frontend Setup
-- [ ] Create `public/index.html` for the front page:
+- [x] Create `public/index.html` for the front page:
   - Add title: "StarScrap" in a bold, gritty, pixelated font (find/integrate a suitable font).
   - Add description: "Survive, scavenge, and uncover impostors in a chaotic 2D battle royale!"
   - Add a "Start Game" button.
-  - Optional: Display a static map preview (`ship.png`?) with tiny character sprites.
-- [ ] Create `public/styles.css`:
+  - Optional: Display a static map preview (`ship.png`) with tiny character sprites.
+- [x] Create `public/styles.css`:
   - Style the front page with a retro background (e.g., starry sky) and pixelated font. Center layout.
-- [ ] Create `public/game.js`:
+- [x] Create `public/game.js`:
   - Set up basic JavaScript to handle page navigation (front page to game page).
   - Add a `<canvas>` for the 2D game arena.
   - Add UI elements for timer, safe zone indicator, task progress.
-- [ ] Test front page:
+- [x] Test front page:
   - Ensure the "Start Game" button switches to a placeholder game page.
 
 ### Day 3 (May 4, 2025): Gameplay Page - Core Mechanics
-- [ ] Create game page structure in `index.html`:
+- [x] Create game page structure in `index.html`:
   - Add a `<canvas>` for the 2D game arena.
   - Add a div for the timer, safe zone indicator, and task progress.
-- [ ] Implement basic game mechanics in `game.js`:
-  - Draw the 2D top-down arena using `ship.png` as the background map on Canvas.
-  - Implement player movement (arrow keys/WASD), constrained by boundaries defined in `mapbound.js`.
-  - Display players using sprites from `player.png` (handle animation frames). Assign blue/red tints or overlays based on role (crewmate/impostor).
-- [ ] Connect frontend to backend:
+- [x] Implement basic game mechanics in `game.js`:
+  - Draw the 2D top-down arena using `ship.png` as the background map on Canvas. since the map is huge, your camera will only show partial of the map (zoom in and character keep in the center) **ship.png 2160 × 1166**
+  - Put some interaction in player.js and connect it to game.js as well as manage the sprite in that js 
+  - Implement player movement (arrow keys/WASD), constrained by boundaries defined in `mapbound.js` 
+  - Display players using sprites from `player.png` (handle animation frames). Assign blue/red tints or overlays based on role (crewmate/impostor). 
+- [x] Connect frontend to backend:
   - Use WebSocket to send player movements and actions to the server.
   - Broadcast player positions to all connected clients.
-- [ ] Test gameplay:
+- [x] Test gameplay:
   - Ensure multiple players can join (via different browser tabs) and move around.
 
 ### Day 4 (May 5, 2025): Gameplay Page - Tasks, Traps & Meetings

@@ -4,37 +4,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StarScrap - Test</title>
+    <title>StarScrap - Battle Royale</title>
+
+    <!-- Google Fonts - Pixelated Style -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
-    <h1>Server is Running!</h1>
-    <p>If you see this, the Express server is serving static files correctly.</p>
+    <!-- Player Count - Initially hidden, shown after connection -->
+    <div id="player-count" class="player-count">
+        <span class="player-icon">👤</span> <span id="count">0</span>
+    </div>
 
-    <script>
-        // Basic WebSocket test
-        const ws = new WebSocket(`ws://${window.location.host}`);
 
-        ws.onopen = () => {
-            console.log('WebSocket connection opened');
-            ws.send(JSON.stringify({ type: 'greeting', message: 'Hello from client!' }));
-        };
+    <div class="container">
+        <h1 class="game-title">STARSCRAP</h1>
+        <p class="game-description">Survive, scavenge, and uncover impostors in a chaotic 2D battle royale!</p>
+        <button class="start-button" id="start-button">START GAME</button>
+    </div>
 
-        ws.onmessage = (event) => {
-            console.log('Message from server: ', event.data);
-            const messageDiv = document.createElement('div');
-            messageDiv.textContent = `Server says: ${event.data}`;
-            document.body.appendChild(messageDiv);
-        };
-
-        ws.onerror = (error) => {
-            console.error('WebSocket error: ', error);
-        };
-
-        ws.onclose = () => {
-            console.log('WebSocket connection closed');
-        };
-    </script>
+    <!-- Game Scripts -->
+    <script src="mapBoundData.js"></script>
+    <script src="mapBound.js"></script>
+    <script src="player.js"></script>
+    <script src="game.js"></script>
 </body>
 
 </html>
