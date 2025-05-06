@@ -26,6 +26,8 @@ const StarScrap = {
         ctx: null,
         gameLoop: null,
         taskUIActive: false,
+        meetingActive: false,
+        controlsDisabled: false,
         assets: {
             shipMap: null,
             playerSprite: null,
@@ -142,7 +144,7 @@ const StarScrap = {
         // Load assets
         this.state.assets.shipMap = this.loader.loadImage('assets/ship.png');
         this.state.assets.playerSprite = this.loader.loadImage('assets/player.png');
-        this.state.assets.deadBodySprite = this.loader.loadImage('assets/deadbody.png');
+        this.state.assets.deadBodySprite = this.loader.loadImage('assets/dead.png');
         
         return true;
     },
@@ -175,6 +177,11 @@ const StarScrap = {
             Tasks.init();
         }
         
+        // Initialize meeting system
+        if (typeof Meeting !== 'undefined') {
+            Meeting.init();
+        }
+        
         // Set up input handlers
         this.setupGameControls();
         
@@ -185,6 +192,11 @@ const StarScrap = {
     // Set up keyboard controls
     setupGameControls: function() {
         window.addEventListener('keydown', (e) => {
+            // If controls are disabled, only allow chat and UI interactions
+            if (this.state.controlsDisabled && !['Enter', 'Escape'].includes(e.key)) {
+                return;
+            }
+            
             switch(e.key) {
                 case 'w': case 'W': case 'ArrowUp':
                     this.state.controls.up = true;
@@ -216,10 +228,49 @@ const StarScrap = {
                     }
                     break;
                 case 'm': case 'M':
-                    console.log('Meeting called!'); // Will implement later
+                    // Try to call a meeting
+                    if (typeof Meeting !== 'undefined' && 
+                        !this.state.taskUIActive && 
+                        !this.state.meetingActive) {
+                        
+                        const meetingCalled = Meeting.callMeeting();
+                        if (meetingCalled) {
+                            console.log('Meeting called!');
+                        }
+                    } else if (this.state.meetingActive) {
+                        console.log('Meeting is already active');
+                    }
                     break;
                 case 't': case 'T':
-                    console.log('Setting trap!'); // Will implement for impostors later
+                    // Try to set trap (impostor only)
+                    if (typeof Player !== 'undefined' && !this.state.taskUIActive && 
+                        Player.properties && Player.properties.role === 'impostor') {
+                        
+                        // Check if near a task
+                        if (typeof Tasks !== 'undefined') {
+                            const nearbyTask = Tasks.findNearbyTask();
+                            if (nearbyTask) {
+                                console.log('Setting trap on task:', nearbyTask.id);
+                                
+                                // Send trap message to server
+                                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                                    this.socket.send(JSON.stringify({
+                                        type: 'set_trap',
+                                        taskId: nearbyTask.id,
+                                        playerId: Player.properties.id
+                                    }));
+                                    
+                                    // Show feedback to player
+                                    alert('Trap set on ' + nearbyTask.name + '!');
+                                }
+                            } else {
+                                console.log('No task nearby to set trap on');
+                                alert('No task nearby to set trap on. Get closer to a task.');
+                            }
+                        }
+                    } else if (Player.properties && Player.properties.role !== 'impostor') {
+                        console.log('Only impostors can set traps');
+                    }
                     break;
                 // Debug controls
                 case 'b': case 'B':
@@ -258,6 +309,11 @@ const StarScrap = {
     
     // Update player position based on controls
     updatePlayer: function() {
+        // If controls are disabled (during meeting), don't update movement
+        if (this.state.controlsDisabled) {
+            return false;
+        }
+        
         // Use the Player module if available
         // Debug log the controls state
         
@@ -602,6 +658,61 @@ const StarScrap = {
                         console.log('Echo received:', data.payload);
                         break;
                         
+                    case 'task_trapped':
+                        // Handle task trapped from server
+                        console.log('Task trapped message received:', data);
+                        if (typeof Tasks !== 'undefined') {
+                            Tasks.handleTaskTrapped(data);
+                            
+                            // Visual feedback for impostor
+                            if (Player.properties.role === 'impostor') {
+                                // Flash visual feedback for impostor
+                                const flashOverlay = document.createElement('div');
+                                flashOverlay.style.position = 'absolute';
+                                flashOverlay.style.top = '0';
+                                flashOverlay.style.left = '0';
+                                flashOverlay.style.width = '100%';
+                                flashOverlay.style.height = '100%';
+                                flashOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
+                                flashOverlay.style.pointerEvents = 'none';
+                                flashOverlay.style.zIndex = '999';
+                                document.body.appendChild(flashOverlay);
+                                
+                                // Remove after short flash
+                                setTimeout(() => {
+                                    if (flashOverlay.parentNode) {
+                                        flashOverlay.parentNode.removeChild(flashOverlay);
+                                    }
+                                }, 300);
+                            }
+                        }
+                        break;
+                        
+                    case 'meeting_start':
+                        // Handle meeting start message
+                        console.log('Meeting start message received:', data);
+                        if (typeof Meeting !== 'undefined') {
+                            Meeting.startMeeting(data);
+                            Meeting.teleportPlayersToStart();
+                        }
+                        break;
+                        
+                    case 'vote_update':
+                        // Handle vote update message
+                        console.log('Vote update message received:', data);
+                        if (typeof Meeting !== 'undefined') {
+                            Meeting.updateVotes(data);
+                        }
+                        break;
+                        
+                    case 'meeting_results':
+                        // Handle meeting results message
+                        console.log('Meeting results message received:', data);
+                        if (typeof Meeting !== 'undefined') {
+                            Meeting.showResults(data);
+                        }
+                        break;
+                        
                     default:
                         console.log('Unhandled message type:', data.type);
                 }
@@ -709,6 +820,24 @@ const StarScrap = {
             this.state.controls.left = false;
             this.state.controls.right = false;
         }
+    },
+    
+    // Disable player controls (for meetings)
+    disablePlayerControls: function() {
+        this.state.controlsDisabled = true;
+        this.state.meetingActive = true;
+        
+        // Reset control states
+        this.state.controls.up = false;
+        this.state.controls.down = false;
+        this.state.controls.left = false;
+        this.state.controls.right = false;
+    },
+    
+    // Enable player controls (after meetings)
+    enablePlayerControls: function() {
+        this.state.controlsDisabled = false;
+        this.state.meetingActive = false;
     }
 };
 

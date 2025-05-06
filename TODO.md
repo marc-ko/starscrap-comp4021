@@ -54,15 +54,15 @@
 
 ### Day 4 (May 5, 2025): Gameplay Page - Tasks, Traps & Meetings
 - [x] Add scavenging and tasks:
-  --- postpone Draw interactable crates on the map; clicking gives items (e.g., laser gun, sword, health pack). Update player state via WebSocket.
+  -- postponed clicking gives items (e.g., laser gun, sword, health pack). Update player state via WebSocket.
   - Add task spots (e.g., fix wire, rope horse); crewmates click to "complete" them (increment task counter via WebSocket). Tasks might appear outside the safe zone. (in task.js)
 - [x] Add impostor mechanics:
   - Impostors click K near crewmates to attack (send attack action via WebSocket).
   - Impostors press ‘T’ to set a trap (e.g., a fake task that stuns crewmates for ~3 seconds). Send trap placement via WebSocket.
-- [ ] Add meeting system:
+- [x] Add meeting system:
   - Press ‘M’ to call a meeting (pauses game, shows voting UI). Send meeting request via WebSocket.
   - Players vote to eject someone (send vote via WebSocket). Server processes votes and broadcasts ejection result.
-- [X] Add Safe Zone Circle 
+- [x] Add Safe Zone Circle 
   - it shirk on count down -> send ws of the safezone countdown 
   - make a purple circle that outside filled with 0.9 opacity of gray
   - minise the player outside the circle 0.1% of health 
@@ -70,7 +70,7 @@
   - Verify tasks increment, traps stun, and meetings eject players.
 
 ### Day 5 (May 6, 2025): Safe Zone, Win/Lose Conditions & Cheating
-- [ ] Add shrinking safe zone:
+- [x] Add shrinking safe zone:
   - Draw a shrinking zone on the canvas (shrinks periodically, e.g., every 30 seconds).
   - Players outside the zone lose health over time (server calculates, updates state via WebSocket).
 - [ ] Implement win/lose conditions:
@@ -94,6 +94,7 @@
 - [ ] Polish gameplay:
   - Add player sprite animations (walking using frames from `player.png`).
   - Add visual feedback (e.g., players flash when hit, task progress bar fills).
+  - Add red overlay if damaged 
 - [ ] Test game over:
   - Ensure game over page displays correctly and "Play Again" resets the game.
 

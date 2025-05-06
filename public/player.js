@@ -30,6 +30,8 @@ const Player = {
         frameTimer: 0,
         frameInterval: 1.5,
         direction: 'down',
+        isStunned: false,
+        stunTime: 0,
         isMoving: false,
         isAlive: true,
         lastUpdated: Date.now(),
@@ -96,6 +98,11 @@ const Player = {
     update: function(controls, boundaryCheck) {
         // If player is dead, they can't move
         if (!this.properties.isAlive) {
+            return false;
+        }
+        
+        // If player is stunned, can't move
+        if (this.properties.isStunned) {
             return false;
         }
         
@@ -462,10 +469,6 @@ const Player = {
     // Try to kill another player
     tryKill: function() {
         // Check if player is impostor
-        // if (this.properties.role !== 'impostor') {
-        //     console.log('Only impostors can kill');
-        //     return false;
-        // }
 
         if(this.properties.lastKillTime && Date.now() - this.properties.lastKillTime < 30000){
             alert('You must wait 30 seconds before you can kill again');
