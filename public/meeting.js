@@ -19,7 +19,9 @@ const Meeting = {
             x: 1400,
             y: 546,
             radius: 100
-        }
+        },
+        reportedBodyId: null,
+        isReportScreen: false
     },
 
     // Initialize meeting module
@@ -27,6 +29,8 @@ const Meeting = {
         console.log('Meeting module initialized');
         // Create meeting UI container (hidden initially)
         this.createMeetingUI();
+        // Create report UI
+        this.createReportUI();
     },
 
     // Check if player is near meeting center
@@ -84,7 +88,11 @@ const Meeting = {
 
     // Start meeting based on server message
     startMeeting: function(data) {
-        console.log('Starting meeting called by:', data.callerId);
+        console.log('Starting meeting called by:', data.callerId, 'data:', data);
+        
+        // Hide report screen if visible
+        const reportContainer = document.getElementById('report-container');
+        if (reportContainer) reportContainer.style.display = 'none';
         
         // Update meeting state
         this.state.isMeetingActive = true;
@@ -94,6 +102,14 @@ const Meeting = {
         this.state.votingEnabled = true;
         this.state.votingResults = null;
         this.state.selectedPlayer = null;
+        this.state.isReportScreen = false;
+        this.state.reportedBodyId = data.deadPlayerId || null;
+        
+        // Make sure dead players appear in the title
+        let callerInfo = data.callerId;
+        if (data.deadPlayerId) {
+            callerInfo += ` reported a dead body (${data.deadPlayerId.substring(24, 30)})`;
+        }
         
         // Disable player controls
         StarScrap.disablePlayerControls();
@@ -103,6 +119,9 @@ const Meeting = {
         
         // Start timer
         this.startMeetingTimer(data.duration);
+        
+        // Force teleport to start position
+        this.teleportPlayersToStart();
     },
 
     // Create the meeting UI elements
@@ -203,8 +222,15 @@ const Meeting = {
         
         // Update caller info
         if (callerInfo) {
-            const callerName = this.state.meetingCaller;
-            callerInfo.textContent = `Meeting called by: ${callerName}`;
+            let callerInfoText = `Meeting called by: ${this.state.meetingCaller}`;
+            
+            // Add dead body info if this is a report
+            if (data.deadPlayerId) {
+                const deadPlayerInfo = data.deadPlayerId.substring(24, 30);
+                callerInfoText += ` (Reported dead body: ${deadPlayerInfo})`;
+            }
+            
+            callerInfo.textContent = callerInfoText;
         }
         
         // Clear and populate players list
@@ -212,9 +238,7 @@ const Meeting = {
             playersContainer.innerHTML = '';
             
             this.state.playersList.forEach(player => {
-                // Skip dead players in voting list
-                if (!player.isAlive) return;
-                
+                // Create button for all players, including dead ones
                 const playerButton = document.createElement('div');
                 playerButton.classList.add('player-vote-button');
                 playerButton.dataset.playerId = player.id;
@@ -222,14 +246,29 @@ const Meeting = {
                 playerButton.style.height = '100px';
                 playerButton.style.margin = '10px';
                 playerButton.style.padding = '10px';
-                playerButton.style.backgroundColor = player.role === 'impostor' && !Player.properties.isAlive ? '#aa0000' : '#444';
-                playerButton.style.border = '2px solid #666';
+                
+                // Style based on player status
+                if (!player.isAlive) {
+                    // Dead player style
+                    playerButton.style.backgroundColor = '#222';
+                    playerButton.style.opacity = '0.7';
+                    playerButton.style.border = '2px solid #aa0000';
+                    playerButton.style.cursor = 'not-allowed';
+                } else {
+                    // Living player style
+                    playerButton.style.backgroundColor = player.role === 'impostor' && !Player.properties.isAlive ? '#aa0000' : '#444';
+                    playerButton.style.border = '2px solid #666';
+                    playerButton.style.cursor = 'pointer';
+                    
+                    // Add event listener for voting (only for living players)
+                    playerButton.onclick = () => this.voteFor(player.id);
+                }
+                
                 playerButton.style.borderRadius = '5px';
                 playerButton.style.display = 'flex';
                 playerButton.style.flexDirection = 'column';
                 playerButton.style.alignItems = 'center';
                 playerButton.style.justifyContent = 'center';
-                playerButton.style.cursor = 'pointer';
                 
                 // Player name
                 const playerName = document.createElement('div');
@@ -237,13 +276,16 @@ const Meeting = {
                 playerName.style.fontWeight = 'bold';
                 playerName.style.marginBottom = '5px';
                 
+                // Add "DEAD" label for dead players
+                if (!player.isAlive) {
+                    playerName.textContent += " (DEAD)";
+                    playerName.style.color = '#aa0000';
+                }
+                
                 // Vote count (initially 0)
                 const voteCount = document.createElement('div');
                 voteCount.classList.add('vote-count');
                 voteCount.textContent = '0 votes';
-                
-                // Add event listener for voting
-                playerButton.onclick = () => this.voteFor(player.id);
                 
                 // Add elements to player button
                 playerButton.appendChild(playerName);
@@ -391,6 +433,11 @@ const Meeting = {
             
             resultsContainer.textContent = `${ejectedName} was ejected!`;
             resultsContainer.style.color = 'red';
+            
+            // Handle the ejection in the Player module
+            if (typeof Player !== 'undefined' && Player.handleEjection) {
+                Player.handleEjection(results.ejected);
+            }
         }
         
         // Show results
@@ -402,16 +449,49 @@ const Meeting = {
 
     // End the meeting
     endMeeting: function() {
+        console.log('Ending meeting');
+        
         // Hide meeting UI
         const meetingContainer = document.getElementById('meeting-container');
         if (meetingContainer) meetingContainer.style.display = 'none';
         
+        // Hide report screen if still visible
+        const reportContainer = document.getElementById('report-container');
+        if (reportContainer) reportContainer.style.display = 'none';
+        
+        // Mark all dead players as reported so they stop showing up
+        if (Player && Player.properties) {
+            // Mark local player if dead
+            if (!Player.properties.isAlive) {
+                Player.properties.isReported = true;
+            }
+            
+            // Mark all other dead players
+            if (Player.otherPlayers) {
+                Player.otherPlayers.forEach((player, id) => {
+                    if (!player.isAlive) {
+                        player.isReported = true;
+                    }
+                });
+            }
+            
+            // Sync to server to ensure changes are propagated
+            if (StarScrap && StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+                Player.syncToServer(StarScrap.socket);
+            }
+        }
+        
         // Update meeting state
         this.state.isMeetingActive = false;
         this.state.votingEnabled = false;
+        this.state.isReportScreen = false;
+        this.state.reportedBodyId = null;
         
-        // Re-enable player controls
-        StarScrap.enablePlayerControls();
+        // Re-enable player controls in StarScrap
+        if (typeof StarScrap !== 'undefined') {
+            StarScrap.enablePlayerControls();
+            StarScrap.state.meetingActive = false;
+        }
     },
 
     // Reset all players to start positions
@@ -425,6 +505,105 @@ const Meeting = {
             if (StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
                 Player.syncToServer(StarScrap.socket);
             }
+        }
+    },
+
+    // Create the report UI for dead body reports
+    createReportUI: function() {
+        const reportContainer = document.createElement('div');
+        reportContainer.id = 'report-container';
+        reportContainer.style.display = 'none';
+        reportContainer.style.position = 'fixed';
+        reportContainer.style.top = '50%';
+        reportContainer.style.left = '50%';
+        reportContainer.style.transform = 'translate(-50%, -50%)';
+        reportContainer.style.width = '500px';
+        reportContainer.style.padding = '20px';
+        reportContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        reportContainer.style.border = '5px solid red';
+        reportContainer.style.borderRadius = '10px';
+        reportContainer.style.zIndex = '999';
+        reportContainer.style.textAlign = 'center';
+        
+        // Create header
+        const header = document.createElement('h1');
+        header.id = 'report-header';
+        header.textContent = 'DEAD BODY FOUND!!!';
+        header.style.color = 'red';
+        header.style.fontSize = '36px';
+        header.style.marginBottom = '20px';
+        
+        // Add elements to report container
+        reportContainer.appendChild(header);
+        
+        // Add to document
+        document.body.appendChild(reportContainer);
+    },
+
+    // Report a dead body and trigger meeting
+    reportBody: function(deadPlayerId) {
+        // Only living players can report bodies
+        if (!Player.properties.isAlive) {
+            return false;
+        }
+
+        // Check if meeting is already active
+        if (this.state.isMeetingActive || this.state.isReportScreen) {
+            return false;
+        }
+
+        // Update state
+        this.state.reportedBodyId = deadPlayerId;
+        this.state.isReportScreen = true;
+
+        // Show report animation
+        this.showReportAnimation();
+
+        // Send report to server
+        if (StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+            StarScrap.socket.send(JSON.stringify({
+                type: 'report_body',
+                playerId: Player.properties.id,
+                deadPlayerId: deadPlayerId
+            }));
+            console.log('Body report sent to server');
+            return true;
+        } else {
+            console.error('WebSocket not connected, cannot report body');
+            this.state.isReportScreen = false;
+            return false;
+        }
+    },
+
+    // Show the report animation
+    showReportAnimation: function() {
+        // Disable player controls
+        StarScrap.disablePlayerControls();
+        
+        // Show report screen
+        const reportContainer = document.getElementById('report-container');
+        if (reportContainer) {
+            reportContainer.style.display = 'block';
+            
+            // Animate the text for emphasis
+            const header = document.getElementById('report-header');
+            if (header && window.anime) {
+                anime({
+                    targets: header,
+                    scale: [1, 1.2, 1],
+                    duration: 1000,
+                    easing: 'easeInOutQuad',
+                    direction: 'alternate',
+                    loop: 2
+                });
+            }
+            
+            // Automatically hide after 3 seconds
+            setTimeout(() => {
+                reportContainer.style.display = 'none';
+                this.state.isReportScreen = false;
+                // Server will send meeting_start message
+            }, 3000);
         }
     }
 };

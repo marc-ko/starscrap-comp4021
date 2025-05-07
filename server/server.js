@@ -48,7 +48,6 @@ const gameState = {
         minRadius: 100, // Minimum size
         shrinkAmount: 150, // How much to shrink each time
         nextShrinkTime: 0, // When the next shrink will happen
-        damageInterval: 1000, // Apply damage every second
         damageAmount: 1 // Damage percent per tick
     },
     meeting: {
@@ -122,7 +121,6 @@ function resetServerState() {
         minRadius: 100, // Minimum size
         shrinkAmount: 150, // How much to shrink each time
         nextShrinkTime: 0, // When the next shrink will happen
-        damageInterval: 1000, // Apply damage every second
         damageAmount: 1 // Damage percent per tick
     };
     
@@ -274,12 +272,14 @@ function startSafeZoneShrinking() {
             
             console.log(`Safe zone shrunk to ${gameState.safeZone.radius}. Next shrink at ${new Date(gameState.safeZone.nextShrinkTime).toISOString()}`);
             
-            // Broadcast safe zone update to all clients
-            broadcastSafeZone();
         }
+        
+        // Broadcast safe zone update to all clients
+        broadcastSafeZone();
         
         // Apply damage to players outside safe zone
         applyOutOfBoundsDamage();
+
         
     }, 1000); // Check every second
 }
@@ -448,6 +448,20 @@ function endMeeting() {
         
         // Save updated player data
         playerData.set(ejectedPlayer, ejectedPlayerData);
+
+        const ejectionUpdateMessage = JSON.stringify({
+            type: 'player_update',
+            player: {
+                ...ejectedPlayerData,
+                id: ejectedPlayer
+            }
+        });
+        
+        connectedPlayers.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(ejectionUpdateMessage);
+            }
+        });
     }
     
     // Broadcast meeting results to all clients
@@ -489,6 +503,58 @@ function teleportAllPlayersToStart() {
     });
 }
 
+// Start a meeting triggered by a body report
+function startReportMeeting(reporterId, reportedBodyId) {
+    // Check if meeting is already active
+    if (gameState.meeting.active) {
+        console.log(`Meeting already in progress, ignoring report from ${reporterId}`);
+        return false;
+    }
+    
+    console.log(`Starting meeting due to body report by ${reporterId}`);
+    
+    // Set meeting state
+    gameState.meeting.active = true;
+    gameState.meeting.callerId = reporterId;
+    gameState.meeting.startTime = Date.now();
+    gameState.meeting.votes = {};
+    
+    // Reset all players to starting positions
+    teleportAllPlayersToStart();
+    
+    // Get players list to send to clients
+    const players = [];
+    playerData.forEach((player, id) => {
+        players.push({
+            id: id,
+            isAlive: player.isAlive !== false,
+            role: player.role
+        });
+    });
+    
+    // Broadcast meeting start to all clients
+    const meetingMessage = JSON.stringify({
+        type: 'meeting_start',
+        callerId: reporterId,
+        deadPlayerId: reportedBodyId,
+        players: players,
+        duration: gameState.meeting.duration
+    });
+    
+    connectedPlayers.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(meetingMessage);
+        }
+    });
+    
+    // Set timeout to end meeting after duration
+    gameState.meeting.countdown = setTimeout(() => {
+        endMeeting();
+    }, gameState.meeting.duration);
+    
+    return true;
+}
+
 // Handle WebSocket connections
 wss.on('connection', (ws, request) => {
     const userId = request.session.userId;
@@ -521,7 +587,8 @@ wss.on('connection', (ws, request) => {
         frameX: 0,
         isMoving: false,
         health: 100,
-        role: Math.random() < 0.2 ? 'impostor' : 'crewmate' // 20% chance to be impostor
+        role: Math.random() < 0.2 ? 'impostor' : 'crewmate', // 20% chance to be impostor
+        isReported: false
     });
     
     // Send welcome message with player's assigned role
@@ -735,6 +802,60 @@ wss.on('connection', (ws, request) => {
                             client.send(voteUpdateMessage);
                         }
                     });
+                    break;
+                
+                case 'report_body':
+                    // Handle body report
+                    console.log(`Body reported by ${userId}: ${data.deadPlayerId}`);
+                    
+                    // Check if reporter is alive
+                    const reporterData = playerData.get(userId);
+                    if (!reporterData || reporterData.isAlive === false) {
+                        console.log(`Ignoring body report from dead player ${userId}`);
+                        break;
+                    }
+                    
+                    // Check if reported player exists and is dead
+                    const reportedPlayer = playerData.get(data.deadPlayerId);
+                    if (!reportedPlayer || reportedPlayer.isAlive !== false) {
+                        console.log(`Invalid dead player report: ${data.deadPlayerId}`);
+                        break;
+                    }
+                    
+                    // Check if body was already reported
+                    if (reportedPlayer.isReported) {
+                        console.log(`Body ${data.deadPlayerId} was already reported, ignoring`);
+                        break;
+                    }
+                    
+                    // Mark the body as reported
+                    reportedPlayer.isReported = true;
+                    playerData.set(data.deadPlayerId, reportedPlayer);
+                    
+                    // First, notify all clients about the report (for animation)
+                    const reportMessage = JSON.stringify({
+                        type: 'report_body',
+                        reporterId: userId,
+                        deadPlayerId: data.deadPlayerId
+                    });
+                    
+                    // Also notify all clients that the body has been reported (to prevent multiple reports)
+                    const bodyReportedMessage = JSON.stringify({
+                        type: 'body_reported',
+                        deadPlayerId: data.deadPlayerId
+                    });
+                    
+                    connectedPlayers.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(reportMessage);
+                            client.send(bodyReportedMessage);
+                        }
+                    });
+                    
+                    // Start meeting after a short delay (to allow for report animation)
+                    setTimeout(() => {
+                        startReportMeeting(userId, data.deadPlayerId);
+                    }, 3000);
                     break;
                 
                 default:

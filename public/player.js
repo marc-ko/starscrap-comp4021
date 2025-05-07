@@ -33,6 +33,7 @@ const Player = {
         isStunned: false,
         stunTime: 0,
         isMoving: false,
+        isReported: false,
         isAlive: true,
         lastUpdated: Date.now(),
         id: null, // Will store the server-assigned player ID
@@ -178,7 +179,12 @@ const Player = {
         try {
             // ** LOCAL PLAYER **
             if (this.properties && typeof this.properties.x === 'number') {
-                this.renderPlayer(ctx, playerSprite, this.properties, cameraX, cameraY);
+                // Skip rendering if player is dead and reported
+                if (!this.properties.isAlive && this.properties.isReported) {
+                    // Skip rendering
+                } else {
+                    this.renderPlayer(ctx, playerSprite, this.properties, cameraX, cameraY);
+                }
             } else {
                 console.error("Local player properties invalid:", this.properties);
             }
@@ -187,6 +193,11 @@ const Player = {
             if (this.otherPlayers && this.otherPlayers.size > 0) {
                 // console.log(`Rendering ${this.otherPlayers.size} other players`);
                 this.otherPlayers.forEach((player, id) => {
+                    // Skip rendering dead and reported players
+                    if (!player.isAlive && player.isReported) {
+                        return;
+                    }
+                    
                     if (player && typeof player.x === 'number') {
                         this.renderPlayer(ctx, playerSprite, player, cameraX, cameraY);
                     } else {
@@ -210,6 +221,11 @@ const Player = {
             return;
         }
         
+        // Skip if player is dead and reported
+        if (player.isAlive === false && player.isReported === true) {
+            return;
+        }
+        
         // Ensure player has all the properties needed for rendering
         const safePlayer = {
             x: player.x || 0,
@@ -222,7 +238,8 @@ const Player = {
             id: player.id || null,
             isAlive: player.isAlive !== false, // Default to alive unless explicitly set to false
             deathX: player.deathX || 0,
-            deathY: player.deathY || 0
+            deathY: player.deathY || 0,
+            isReported: player.isReported || false
         };
         
         ctx.save();
@@ -230,6 +247,12 @@ const Player = {
         // If player is dead, render the dead body sprite instead
         if (!safePlayer.isAlive) {
             if (StarScrap && StarScrap.state && StarScrap.state.assets && StarScrap.state.assets.deadBodySprite && StarScrap.state.assets.deadBodySprite.complete) {
+                // Skip rendering if dead body is reported
+                if (safePlayer.isReported) {
+                    ctx.restore();
+                    return;
+                }
+                
                 // Draw dead body sprite
                 const deadBodySprite = StarScrap.state.assets.deadBodySprite;
                 
@@ -367,7 +390,34 @@ const Player = {
     // Apply damage to player's health
     takeDamage: function(amount) {
         this.properties.health = Math.max(0, this.properties.health - amount);
+        // Show red damage overlay
+        this.showDamageOverlay();
         return this.properties.health;
+    },
+    
+    // Show damage overlay effect
+    showDamageOverlay: function() {
+        // Create overlay element
+        const damageOverlay = document.createElement('div');
+        damageOverlay.id = 'damage-overlay';
+        damageOverlay.style.position = 'absolute';
+        damageOverlay.style.top = '0';
+        damageOverlay.style.left = '0';
+        damageOverlay.style.width = '100%';
+        damageOverlay.style.height = '100%';
+        damageOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+        damageOverlay.style.pointerEvents = 'none'; // Don't interfere with clicks
+        damageOverlay.style.zIndex = '1000'; // Make sure it's on top
+        
+        // Add to document body
+        document.body.appendChild(damageOverlay);
+        
+        // Remove after 0.1 seconds
+        setTimeout(() => {
+            if (damageOverlay.parentNode) {
+                damageOverlay.parentNode.removeChild(damageOverlay);
+            }
+        }, 100);
     },
     
     // Heal player's health
@@ -401,9 +451,12 @@ const Player = {
                     health: this.properties.health,
                     role: this.properties.role,
                     isAlive: this.properties.isAlive,
+                    isStunned: this.properties.isStunned,
+                    stunTime: this.properties.stunTime,
                     deathTime: this.properties.deathTime,
                     deathX: this.properties.deathX,
-                    deathY: this.properties.deathY
+                    deathY: this.properties.deathY,
+                    isReported: this.properties.isReported
                 }
             }));
         }
@@ -421,9 +474,18 @@ const Player = {
         
         // If this is for the local player, ignore
         if (playerData.id === this.properties.id) {
+            // Check if health decreased (taking damage)
+            const oldHealth = this.properties.health;
             this.properties.health = playerData.health;
+            
+            // If health decreased, show damage overlay
+            if (oldHealth > this.properties.health) {
+                this.showDamageOverlay();
+            }
+            
             this.properties.isAlive = playerData.isAlive;
             this.properties.deathTime = playerData.deathTime;
+            this.properties.isReported = playerData.isReported || this.properties.isReported;
             return;
         }
 
@@ -478,6 +540,7 @@ const Player = {
         // Check if 1 minute has passed since game start
         if (StarScrap && StarScrap.state && StarScrap.state.gameStartTime) {
             const gameTimeElapsed = Date.now() - StarScrap.state.gameStartTime;
+            console.log('gameTimeElapsed',gameTimeElapsed);
             if (gameTimeElapsed < 60000) { // 60000ms = 1 minute
                 alert('Killing is not available yet. Wait for 1 minute after game start.');
                 return false;
@@ -549,5 +612,119 @@ const Player = {
         
         // Disable movement
         this.properties.speed = 0;
+    },
+
+    // Add a method to check if current player is near any dead body
+    isNearDeadBody: function() {
+        // Skip if player is not alive
+        if (!this.properties.isAlive) return false;
+        
+        // Detection range for dead bodies (adjust as needed)
+        const REPORT_RANGE = 100;
+        
+        // Check distance to each dead player
+        let nearestBody = null;
+        let nearestDistance = Infinity;
+        
+        this.otherPlayers.forEach((player, playerId) => {
+            // Only check dead players that haven't been reported yet
+            if (player.isAlive === false && player.isReported !== true) {
+                // Calculate distance
+                const dx = this.properties.x - player.x;
+                const dy = this.properties.y - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Check if within reporting range
+                if (distance <= REPORT_RANGE && distance < nearestDistance) {
+                    nearestBody = playerId;
+                    nearestDistance = distance;
+                }
+            }
+        });
+        
+        return nearestBody ? { playerId: nearestBody, distance: nearestDistance } : false;
+    },
+
+    // Mark a player's body as reported
+    markBodyAsReported: function(playerId) {
+        // If it's the local player
+        if (this.properties.id === playerId) {
+            this.properties.isReported = true;
+            return;
+        }
+        
+        // If it's another player
+        if (this.otherPlayers.has(playerId)) {
+            const player = this.otherPlayers.get(playerId);
+            player.isReported = true;
+            this.otherPlayers.set(playerId, player);
+        }
+    },
+
+    // Handle player being ejected from meeting
+    handleEjection: function(ejectedPlayerId) {
+        console.log(`Handling ejection of player: ${ejectedPlayerId}`);
+        
+        // If it's the local player
+        if (this.properties.id === ejectedPlayerId) {
+            console.log('You were ejected from the game!');
+            this.properties.isAlive = false;
+            this.properties.deathTime = Date.now();
+            this.properties.deathX = this.properties.x;
+            this.properties.deathY = this.properties.y;
+            
+            // Show ejection message
+            const deathMessage = document.createElement('div');
+            deathMessage.id = 'death-message';
+            deathMessage.style.position = 'absolute';
+            deathMessage.style.top = '50%';
+            deathMessage.style.left = '50%';
+            deathMessage.style.transform = 'translate(-50%, -50%)';
+            deathMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            deathMessage.style.color = 'red';
+            deathMessage.style.padding = '20px';
+            deathMessage.style.borderRadius = '10px';
+            deathMessage.style.fontSize = '24px';
+            deathMessage.style.fontWeight = 'bold';
+            deathMessage.style.zIndex = '1000';
+            deathMessage.textContent = 'You were ejected from the game!';
+            
+            document.body.appendChild(deathMessage);
+            
+            // Fade out the message after 3 seconds
+            setTimeout(() => {
+                if (deathMessage && deathMessage.parentNode) {
+                    if (typeof $(deathMessage).fadeOut === 'function') {
+                        $(deathMessage).fadeOut(3000);
+                    } else {
+                        deathMessage.style.opacity = '0';
+                        deathMessage.style.transition = 'opacity 3s';
+                        setTimeout(() => {
+                            if (deathMessage.parentNode) {
+                                deathMessage.parentNode.removeChild(deathMessage);
+                            }
+                        }, 3000);
+                    }
+                }
+            }, 3000);
+            
+            // Disable movement
+            this.properties.speed = 0;
+        } 
+        // If it's another player
+        else if (this.otherPlayers.has(ejectedPlayerId)) {
+            console.log(`Player ${ejectedPlayerId} was ejected`);
+            const player = this.otherPlayers.get(ejectedPlayerId);
+            player.isAlive = false;
+            player.deathTime = Date.now();
+            player.deathX = player.x;
+            player.deathY = player.y;
+            this.otherPlayers.set(ejectedPlayerId, player);
+        }
+        
+        // Sync with server to confirm the state change
+        if (StarScrap && StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+            this.syncToServer(StarScrap.socket);
+        }
     }
 };

@@ -227,6 +227,23 @@ const StarScrap = {
                         }
                     }
                     break;
+                case 'r': case 'R':
+                    // Try to report a dead body
+                    if (typeof Player !== 'undefined' && 
+                        typeof Meeting !== 'undefined' && 
+                        !this.state.taskUIActive && 
+                        !this.state.meetingActive) {
+                        
+                        // Check if near a dead body
+                        const nearBody = Player.isNearDeadBody();
+                        if (nearBody) {
+                            console.log('Reporting dead body:', nearBody.playerId);
+                            Meeting.reportBody(nearBody.playerId);
+                        } else {
+                            console.log('No dead body nearby to report');
+                        }
+                    }
+                    break;
                 case 'm': case 'M':
                     // Try to call a meeting
                     if (typeof Meeting !== 'undefined' && 
@@ -310,7 +327,7 @@ const StarScrap = {
     // Update player position based on controls
     updatePlayer: function() {
         // If controls are disabled (during meeting), don't update movement
-        if (this.state.controlsDisabled) {
+        if (this.state.controlsDisabled || (Player && Player.properties && !Player.properties.isAlive)) {
             return false;
         }
         
@@ -399,6 +416,8 @@ const StarScrap = {
         if (!StarScrap.state.safeZone || !StarScrap.state.safeZone.radius) return;
         
         const safeZone = StarScrap.state.safeZone;
+
+        console.log('safeZone',safeZone);
         
         // Calculate safe zone position relative to camera
         const screenX = safeZone.centerX - camera.x;
@@ -450,13 +469,13 @@ const StarScrap = {
             const seconds = String(Math.floor((gameElapsedTime % 60000) / 1000)).padStart(2, '0');
             $('#timer').text(`${minutes}:${seconds}`);
         }
-        
         StarScrap.render();
         requestAnimationFrame(StarScrap.gameLoop);
     },
     // Start the game loop
     startGameLoop: function() {
-        console.log('Starting game loop...');
+        console.log('Starting game loop');
+        
         StarScrap.gameLoop();
     },
     
@@ -499,7 +518,8 @@ const StarScrap = {
         this.socket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                // Handle different message types
+                console.log('Received socket message:', data.type);
+                
                 switch (data.type) {
                     case 'welcome':
                         console.log('Welcome message received:', data);
@@ -634,11 +654,11 @@ const StarScrap = {
                             document.body.appendChild(deathMessage);
                             
                             // // Remove death message after 3 seconds
-                            // setTimeout(() => {
-                            //     if (deathMessage && deathMessage.parentNode) {
-                            //         deathMessage.parentNode.removeChild(deathMessage);
-                            //     }
-                            // }, 3000);
+                            setTimeout(() => {
+                                if (deathMessage && deathMessage.parentNode) {
+                                    deathMessage.parentNode.removeChild(deathMessage);
+                                }
+                            }, 3000);
                         }
                         
                         // If another player died, update their state
@@ -688,15 +708,54 @@ const StarScrap = {
                         }
                         break;
                         
-                    case 'meeting_start':
-                        // Handle meeting start message
-                        console.log('Meeting start message received:', data);
-                        if (typeof Meeting !== 'undefined') {
-                            Meeting.startMeeting(data);
-                            Meeting.teleportPlayersToStart();
+                    case 'report_body':
+                        // Handle when someone reported a body
+                        console.log('Body reported by:', data.reporterId);
+                        // Set meeting flag to prevent movement
+                        this.state.meetingActive = true;
+                        this.state.controlsDisabled = true;
+                        
+                        if (typeof Meeting !== 'undefined' && Meeting.showReportAnimation) {
+                            Meeting.showReportAnimation();
                         }
                         break;
                         
+                    case 'meeting_start':
+                        // Handle meeting start
+                        console.log('Meeting start message received:', data);
+                        // Ensure controls are disabled
+                        this.state.meetingActive = true;
+                        this.state.controlsDisabled = true;
+                        
+                        if (typeof Meeting !== 'undefined' && Meeting.startMeeting) {
+                            Meeting.startMeeting(data);
+                        }
+                        break;
+                        
+                    case 'meeting_results':
+                        // Handle meeting results
+                        console.log('Meeting results received:', data);
+                        
+                        // Store ejected player info
+                        if (data.ejected && data.ejected !== 'skip') {
+                            // Update PlayerData if this is us or another player
+                            if (typeof Player !== 'undefined' && Player.handleEjection) {
+                                Player.handleEjection(data.ejected);
+                            }
+                        }
+                        
+                        // Show meeting results UI
+                        if (typeof Meeting !== 'undefined' && Meeting.showResults) {
+                            Meeting.showResults(data);
+                        }
+                        
+                        // Broadcast player update to make sure all clients have the latest state
+                        if (Player && Player.properties && StarScrap.socket && 
+                            StarScrap.socket.readyState === WebSocket.OPEN) {
+                            Player.syncToServer(this.socket);
+                        }
+                        break;
+                    
                     case 'vote_update':
                         // Handle vote update message
                         console.log('Vote update message received:', data);
@@ -704,15 +763,15 @@ const StarScrap = {
                             Meeting.updateVotes(data);
                         }
                         break;
-                        
-                    case 'meeting_results':
-                        // Handle meeting results message
-                        console.log('Meeting results message received:', data);
-                        if (typeof Meeting !== 'undefined') {
-                            Meeting.showResults(data);
+                    
+                    case 'body_reported':
+                        // Handle when a body is marked as reported
+                        console.log('Body marked as reported:', data.deadPlayerId);
+                        if (typeof Player !== 'undefined' && Player.markBodyAsReported) {
+                            Player.markBodyAsReported(data.deadPlayerId);
                         }
                         break;
-                        
+                    
                     default:
                         console.log('Unhandled message type:', data.type);
                 }
@@ -822,23 +881,152 @@ const StarScrap = {
         }
     },
     
-    // Disable player controls (for meetings)
+    // Disable player controls during meeting/task
     disablePlayerControls: function() {
         this.state.controlsDisabled = true;
-        this.state.meetingActive = true;
-        
-        // Reset control states
         this.state.controls.up = false;
         this.state.controls.down = false;
         this.state.controls.left = false;
         this.state.controls.right = false;
     },
     
-    // Enable player controls (after meetings)
+    // Re-enable player controls after meeting/task
     enablePlayerControls: function() {
         this.state.controlsDisabled = false;
-        this.state.meetingActive = false;
-    }
+    },
+
+    // Display report indicator if near a dead body
+    renderReportIndicator: function() {
+        // Skip if player is dead or game is in a meeting/task
+        if (!Player.properties.isAlive || this.state.meetingActive || this.state.taskUIActive) {
+            return;
+        }
+        
+        // Check if near any dead body
+        const nearBody = Player.isNearDeadBody();
+        if (nearBody) {
+            // Get dead player's position
+            const deadPlayer = Player.otherPlayers.get(nearBody.playerId);
+            if (!deadPlayer) return;
+            
+            // Skip if the body is already reported
+            if (deadPlayer.isReported) return;
+            
+            // Calculate screen position
+            const screenX = deadPlayer.x - this.state.camera.x;
+            const screenY = deadPlayer.y - this.state.camera.y - 30; // Position above the dead body
+            
+            // Draw "Press R to Report" text
+            this.state.ctx.save();
+            this.state.ctx.font = 'bold 16px Arial';
+            this.state.ctx.textAlign = 'center';
+            this.state.ctx.fillStyle = 'red';
+            this.state.ctx.strokeStyle = 'black';
+            this.state.ctx.lineWidth = 3;
+            this.state.ctx.strokeText('Press R to Report', screenX, screenY);
+            this.state.ctx.fillText('Press R to Report', screenX, screenY);
+            this.state.ctx.restore();
+        }
+    },
+
+    // Render functions for game elements
+
+    // Render the game background (map)
+    renderBackground: function() {
+        // Draw map with camera offset
+        this.state.ctx.drawImage(
+            this.state.assets.shipMap,
+            this.state.camera.x, this.state.camera.y, 
+            this.state.camera.width, this.state.camera.height,
+            0, 0, 
+            this.state.camera.width, this.state.camera.height
+        );
+    },
+
+    // Render other players and dead bodies
+    renderOtherPlayers: function() {
+        if (Player && Player.otherPlayers) {
+            Player.otherPlayers.forEach((player, id) => {
+                // Skip if player data is invalid
+                if (!player || typeof player.x !== 'number') return;
+                
+                // If player is dead, render dead body sprite
+                if (player.isAlive === false) {
+                    // Position of dead body
+                    const deadX = player.deathX || player.x;
+                    const deadY = player.deathY || player.y;
+                    
+                    // Calculate screen position
+                    const screenX = deadX - this.state.camera.x;
+                    const screenY = deadY - this.state.camera.y;
+                    
+                    // Draw dead body sprite if available, otherwise draw a placeholder
+                    if (this.state.assets.deadBodySprite && this.state.assets.deadBodySprite.complete) {
+                        this.state.ctx.drawImage(
+                            this.state.assets.deadBodySprite,
+                            0, 0,
+                            this.state.assets.deadBodySprite.width, this.state.assets.deadBodySprite.height,
+                            screenX, screenY,
+                            40, 40
+                        );
+                    } else {
+                        // Placeholder for dead body
+                        this.state.ctx.save();
+                        this.state.ctx.fillStyle = 'red';
+                        this.state.ctx.beginPath();
+                        this.state.ctx.arc(screenX + 20, screenY + 20, 20, 0, Math.PI * 2);
+                        this.state.ctx.fill();
+                        this.state.ctx.restore();
+                    }
+                    
+                    // Draw player ID above the dead body
+                    this.state.ctx.save();
+                    this.state.ctx.font = '12px Arial';
+                    this.state.ctx.textAlign = 'center';
+                    this.state.ctx.fillStyle = 'red';
+                    this.state.ctx.fillText(
+                        `${id.substring(24, 30)} (DEAD)`, 
+                        screenX + 20, 
+                        screenY - 5
+                    );
+                    this.state.ctx.restore();
+                } else {
+                    // Render living player using Player.renderPlayer method
+                    Player.renderPlayer(
+                        this.state.ctx, 
+                        this.state.assets.playerSprite, 
+                        player, 
+                        this.state.camera.x, 
+                        this.state.camera.y
+                    );
+                }
+            });
+        }
+    },
+
+    // Render tasks
+    renderTasks: function() {
+        // If Tasks module exists and has a render method, call it
+            Tasks.renderTasks(this.state.ctx, this.state.camera.x, this.state.camera.y);
+    },
+
+    // Render local player
+    renderPlayer: function() {
+        // Skip if player is not initialized or not alive
+        if (!Player || !Player.properties) return;
+        
+        // If player is alive, render using Player module
+        if (Player.properties.isAlive) {
+            Player.renderPlayer(
+                this.state.ctx, 
+                this.state.assets.playerSprite, 
+                Player.properties, 
+                this.state.camera.x, 
+                this.state.camera.y
+            );
+        }
+    },
+
 };
 
 // Initialize the game when the DOM is fully loaded
