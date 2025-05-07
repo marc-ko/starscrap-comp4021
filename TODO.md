@@ -53,8 +53,8 @@
   - Ensure multiple players can join (via different browser tabs) and move around.
 
 ### Day 4 (May 5, 2025): Gameplay Page - Tasks, Traps & Meetings
-- [x] Add scavenging and tasks:
-  -- postponed clicking gives items (e.g., laser gun, sword, health pack). Update player state via WebSocket.
+- [ ] Add scavenging and tasks:
+  --clicking gives items (e.g., laser gun, sword, health pack). Update player state via WebSocket.
   - Add task spots (e.g., fix wire, rope horse); crewmates click to "complete" them (increment task counter via WebSocket). Tasks might appear outside the safe zone. (in task.js)
 - [x] Add impostor mechanics:
   - Impostors click K near crewmates to attack (send attack action via WebSocket).
@@ -73,11 +73,11 @@
 - [x] Add shrinking safe zone:
   - Draw a shrinking zone on the canvas (shrinks periodically, e.g., every 30 seconds).
   - Players outside the zone lose health over time (server calculates, updates state via WebSocket).
-- [ ] Implement win/lose conditions:
+- [x] Implement win/lose conditions:
   - Crewmates win: All tasks completed OR all impostors eliminated.
   - Impostors win: Crewmate count <= impostor count OR time runs out (if applicable) OR sabotage succeeds (if added).
   - Individual Lose: Player eliminated (killed), voted out, or dies outside safe zone.
-- [ ] Add cheating mechanism:
+- [x] Add cheating mechanism:
   - Enable: Press ‘Ctrl + C’ to reveal roles (impostors glow red) for 5 seconds. (Client-side effect).
   - Disable: Automatically disable after 5 seconds or press ‘X’ to disable manually.
 - [ ] Test gameplay:

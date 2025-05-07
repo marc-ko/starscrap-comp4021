@@ -19,6 +19,7 @@ const Player = {
     properties: {
         x: 0,
         y: 0,
+        killChance: 0,
         width: PLAYER_WIDTH,
         height: PLAYER_HEIGHT,
         speed: PLAYER_SPEED,
@@ -37,7 +38,6 @@ const Player = {
         isAlive: true,
         lastUpdated: Date.now(),
         id: null, // Will store the server-assigned player ID
-        isDead: false,
         deathTime: null,
         deathX: 0,
         deathY: 0,
@@ -91,6 +91,12 @@ const Player = {
         const healthElement = document.getElementById('health-indicator');
         if (healthElement) {
             healthElement.textContent = `Health: ${this.properties.health}`;
+        }
+        
+        // Update killChance UI
+        const killChanceElement = document.getElementById('kill-chance-indicator');
+        if (killChanceElement) {
+            killChanceElement.textContent = `Weapon Count: ${this.properties.killChance}`;
         }
     },
     
@@ -166,7 +172,7 @@ const Player = {
         
         // Calculate time since last update for syncing
         const currentTime = Date.now();
-        if (currentTime - this.properties.lastUpdated > 100) { // Sync every 100ms regardless of movement
+        if (currentTime - this.properties.lastUpdated > 200) { // Sync every 100ms regardless of movement
             this.properties.lastUpdated = currentTime;
             return true; // Signal that we should sync with server
         }
@@ -175,7 +181,7 @@ const Player = {
     },
     
     // Render player
-    render: function(ctx, playerSprite, cameraX, cameraY) {
+    render: function(ctx, playerSprite, cameraX, cameraY, isCheating) {
         try {
             // ** LOCAL PLAYER **
             if (this.properties && typeof this.properties.x === 'number') {
@@ -183,7 +189,7 @@ const Player = {
                 if (!this.properties.isAlive && this.properties.isReported) {
                     // Skip rendering
                 } else {
-                    this.renderPlayer(ctx, playerSprite, this.properties, cameraX, cameraY);
+                    this.renderPlayer(ctx, playerSprite, this.properties, cameraX, cameraY, isCheating);
                 }
             } else {
                 console.error("Local player properties invalid:", this.properties);
@@ -199,7 +205,7 @@ const Player = {
                     }
                     
                     if (player && typeof player.x === 'number') {
-                        this.renderPlayer(ctx, playerSprite, player, cameraX, cameraY);
+                        this.renderPlayer(ctx, playerSprite, player, cameraX, cameraY, isCheating);
                     } else {
                         console.error(`Invalid player data for ${id}:`, player);
                     }
@@ -211,7 +217,7 @@ const Player = {
     },
     
     // Render a specific player (local or remote)
-    renderPlayer: function(ctx, playerSprite, player, cameraX, cameraY) {
+    renderPlayer: function(ctx, playerSprite, player, cameraX, cameraY, isCheating) {
         // Only render if the sprite is loaded
         if (!playerSprite || !playerSprite.complete) return;
         
@@ -237,6 +243,7 @@ const Player = {
             role: player.role || 'crewmate',
             id: player.id || null,
             isAlive: player.isAlive !== false, // Default to alive unless explicitly set to false
+            killChance: player.killChance || 0,
             deathX: player.deathX || 0,
             deathY: player.deathY || 0,
             isReported: player.isReported || false
@@ -296,7 +303,7 @@ const Player = {
         }
         
         // Apply tint for impostors (red) or crewmates (blue) ONLY for the local player
-        if (safePlayer.id === this.properties.id) {
+        if (safePlayer.id === this.properties.id || isCheating) {
             if (safePlayer.role === 'impostor') {
                 ctx.globalAlpha = 0.3;
                 ctx.fillStyle = 'red';
@@ -397,6 +404,7 @@ const Player = {
     
     // Show damage overlay effect
     showDamageOverlay: function() {
+        // StarScrap.state.assets.damageSound.play();
         // Create overlay element
         const damageOverlay = document.createElement('div');
         damageOverlay.id = 'damage-overlay';
@@ -451,6 +459,7 @@ const Player = {
                     health: this.properties.health,
                     role: this.properties.role,
                     isAlive: this.properties.isAlive,
+                    killChance: this.properties.killChance,
                     isStunned: this.properties.isStunned,
                     stunTime: this.properties.stunTime,
                     deathTime: this.properties.deathTime,
@@ -528,11 +537,134 @@ const Player = {
         return false;
     },
     
-    // Try to kill another player
+    // Try to pick up a nearby item
+    tryPickupItem: function() {
+        if (!this.properties.isAlive || this.properties.isStunned) {
+            return false;
+        }
+        
+        // Check if Item module exists
+        if (typeof Item === 'undefined') {
+            console.error('Item module not loaded');
+            return false;
+        }
+        
+        // Try to pick up a nearby item
+        const item = Item.tryPickupNearbyItem(this.properties.x, this.properties.y, this.properties.id);
+        if (!item) {
+            return false;
+        }
+        
+        // Increase kill chance
+        this.properties.killChance += item.killChanceBonus;
+        
+        // Update UI
+        this.updateHealthUI();
+        
+        // Send update to server
+        if (typeof StarScrap !== 'undefined' && StarScrap.socket && 
+            StarScrap.socket.readyState === WebSocket.OPEN) {
+            
+            // Send item pickup message
+            StarScrap.socket.send(JSON.stringify({
+                type: 'item_pickup',
+                itemId: item.id,
+                playerId: this.properties.id,
+                killChance: this.properties.killChance
+            }));
+            
+            // Also sync player state
+            this.syncToServer(StarScrap.socket);
+        }
+        
+        // Show pickup notification
+        this.showItemPickupNotification(item);
+        
+        return true;
+    },
+
+    // Display item pickup notification
+    showItemPickupNotification: function(item) {
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.className = 'item-pickup-notification';
+        notification.textContent = `You picked up ${item.name.replace('_', ' ')}! +${item.killChanceBonus} weapon`;
+        notification.style.position = 'absolute';
+        notification.style.top = '120px';
+        notification.style.left = '50%';
+        notification.style.transform = 'translateX(-50%)';
+        notification.style.backgroundColor = 'rgba(0, 255, 0, 0.7)';
+        notification.style.color = 'white';
+        notification.style.padding = '10px 20px';
+        notification.style.borderRadius = '5px';
+        notification.style.fontWeight = 'bold';
+        notification.style.zIndex = '1000';
+        notification.style.textAlign = 'center';
+        
+        // Add to the document
+        document.body.appendChild(notification);
+        
+        // Remove after a few seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 3000);
+    },
+
+    // Try to kill another player (now supports crewmates with kill chance)
     tryKill: function() {
         // Check if player is impostor
+        const crewkillingProbability = 0.8;
+        let usingKillChance = false;
 
-        if(this.properties.lastKillTime && Date.now() - this.properties.lastKillTime < 30000){
+        
+        if(this.properties.role !== 'impostor' && this.properties.killChance === 0){
+            alert('You have NO weapon to do this');
+            return false;
+        }
+        
+        if(this.properties.role !== 'impostor'){
+            usingKillChance = true;
+        }
+
+        console.log('crewkillingProbability',(Math.random()*1));
+        
+        if(this.properties.role === 'crewmate' && (Math.random()*100) < crewkillingProbability*100){
+
+
+            // Show failure notification
+            const notification = document.createElement('div');
+            notification.className = 'kill-failure-notification';
+            notification.textContent = 'Missed! you lost 1 weapon count';
+            notification.style.position = 'absolute';
+            notification.style.top = '500px';
+            notification.style.left = '50%';
+            notification.style.transform = 'translateX(-50%)';
+            notification.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+            notification.style.color = 'white';
+            notification.style.padding = '10px 20px';
+            notification.style.borderRadius = '5px';
+            notification.style.fontWeight = 'bold';
+            notification.style.zIndex = '1000';
+            notification.style.textAlign = 'center';
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 3000);
+
+            this.properties.killChance -= 1;
+            this.updateHealthUI();
+            
+            return false;
+        }
+
+
+        if(this.properties.lastKillTime && Date.now() - this.properties.lastKillTime < 30000 && !(this.properties.role == 'crewmate' && usingKillChance)){
             alert('You must wait 30 seconds before you can kill again');
             return false;
         }
@@ -575,7 +707,11 @@ const Player = {
         if (nearestVictim) {
             // Perform the kill
             console.log(`Killing player ${nearestVictim.id}`);
+            StarScrap.state.assets.killSound.play();
+            if( this.properties.role === 'crewmate') this.properties.killChance -= 1;
             
+            this.updateHealthUI();
+
             // Update the player's state locally
             nearestVictim.player.isAlive = false;
             nearestVictim.player.deathTime = Date.now();
@@ -595,6 +731,7 @@ const Player = {
                     y: nearestVictim.player.y
                 }));
             }
+            
             
             return true;
         }
@@ -689,7 +826,10 @@ const Player = {
             deathMessage.style.zIndex = '1000';
             deathMessage.textContent = 'You were ejected from the game!';
             
+            
             document.body.appendChild(deathMessage);
+
+
             
             // Fade out the message after 3 seconds
             setTimeout(() => {

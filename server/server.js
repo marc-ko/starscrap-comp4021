@@ -36,10 +36,18 @@ const wss = new WebSocket.Server({ noServer: true });
 // Player tracking
 const connectedPlayers = new Map(); // userId -> websocket connection
 const playerData = new Map(); // userId -> player data (position, health, etc.)
+let safeZoneTimer = null;
 
 // Game state
 const gameState = {
     startTime: null,
+    gameInProgress: false,
+    countdownStarted: false,
+    countdownTimer: null,
+    readyToStart: false,
+    minPlayers: 3, // Minimum players required to start
+    completedTasks: 0,
+    totalTasks: 0,
     safeZone: {
         centerX: 1400, // Initial safe zone center (near player start)
         centerY: 580,
@@ -113,6 +121,15 @@ function resetServerState() {
     
     // Reset game state
     gameState.startTime = null;
+    gameState.gameInProgress = false;
+    gameState.countdownStarted = false;
+    gameState.readyToStart = false;
+    if (gameState.countdownTimer) {
+        clearTimeout(gameState.countdownTimer);
+        gameState.countdownTimer = null;
+    }
+    gameState.completedTasks = 0;
+    gameState.totalTasks = 0;
     gameState.safeZone = {
         centerX: 1400, // Initial safe zone center (near player start)
         centerY: 580,
@@ -123,6 +140,11 @@ function resetServerState() {
         nextShrinkTime: 0, // When the next shrink will happen
         damageAmount: 1 // Damage percent per tick
     };
+
+    if (safeZoneTimer) {
+        clearInterval(safeZoneTimer);
+        safeZoneTimer = null;
+    }
     
     // Reset meeting state
     gameState.meeting = {
@@ -231,30 +253,47 @@ function sendExistingPlayersTo(targetUserId) {
 
 // Function to handle player disconnection
 function handlePlayerDisconnect(userId) {
-    // Remove from tracking maps
+    console.log(`Player disconnected: ${userId}`);
+    
+    // Remove player from connected list
     connectedPlayers.delete(userId);
-    playerData.delete(userId);
     
-    // Notify all clients about the disconnection
-    const message = JSON.stringify({
-        type: 'player_disconnect',
-        playerId: userId
-    });
+    // Keep player data for now, but mark as disconnected
+    if (playerData.has(userId)) {
+        const player = playerData.get(userId);
+        player.isAlive = false;
+        player.disconnected = true;
+        playerData.set(userId, player);
+        
+        // Check win conditions if game is in progress
+        if (gameState.gameInProgress) {
+            checkWinConditions();
+        }
+    }
     
+    // Notify other clients about the disconnection
     connectedPlayers.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
+            client.send(JSON.stringify({
+                type: 'player_disconnect',
+                playerId: userId
+            }));
         }
     });
     
     // Update player count
     broadcastPlayerCount();
+    
+    // Reset server state if all players have left
+    if (connectedPlayers.size === 0) {
+        resetServerState();
+    }
 }
 
 // Start safe zone shrinking process
 function startSafeZoneShrinking() {
     // Set interval to check and shrink safe zone
-    setInterval(() => {
+    safeZoneTimer = setInterval(() => {
         const currentTime = Date.now();
         
         // Check if it's time to shrink the safe zone
@@ -305,6 +344,7 @@ function applyOutOfBoundsDamage() {
                 player.deathTime = Date.now();
                 player.deathX = player.x;
                 player.deathY = player.y;
+                
                 
                 // Broadcast death due to safe zone
                 const deathMessage = JSON.stringify({
@@ -449,6 +489,9 @@ function endMeeting() {
         // Save updated player data
         playerData.set(ejectedPlayer, ejectedPlayerData);
 
+        // Track the ejection - could attribute "kills" to voters
+        // For simplicity, we don't count ejections as kills for any specific player
+        
         const ejectionUpdateMessage = JSON.stringify({
             type: 'player_update',
             player: {
@@ -555,48 +598,253 @@ function startReportMeeting(reporterId, reportedBodyId) {
     return true;
 }
 
+// Function to check if game can start (3+ players)
+function checkGameStart() {
+    // If game is already in progress or countdown started, don't check
+    if (gameState.gameInProgress || gameState.countdownStarted) {
+        return;
+    }
+    
+    const playerCount = connectedPlayers.size;
+    
+    // Need minimum 3 players to start
+    if (playerCount >= gameState.minPlayers) {
+        console.log(`We have ${playerCount} players, starting game countdown!`);
+        startGameCountdown();
+    } else {
+        console.log(`Need ${gameState.minPlayers} players to start, currently have ${playerCount}`);
+    }
+}
+
+// Function to start game countdown
+function startGameCountdown() {
+    gameState.countdownStarted = true;
+    
+    // Send countdown message to all clients
+    const countdownMessage = JSON.stringify({
+        type: 'game_countdown',
+        countdown: 10, // 10 seconds countdown
+    });
+    
+    connectedPlayers.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(countdownMessage);
+        }
+    });
+    
+    // Set timeout to start game after 5 seconds
+    gameState.countdownTimer = setTimeout(() => {
+        startGame();
+    }, 10000);
+}
+
+// Function to start the game
+function startGame() {
+    gameState.gameInProgress = true;
+    gameState.startTime = Date.now();
+    
+    console.log('Game starting! Assigning roles...');
+    
+    // Assign roles
+    assignRoles();
+    
+    // Send game start message to all clients
+    const startMessage = JSON.stringify({
+        type: 'game_start',
+        startTime: gameState.startTime
+    });
+    
+    connectedPlayers.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(startMessage);
+        }
+    });
+    
+    // Start safe zone shrinking
+    startSafeZoneShrinking();
+    
+    // Inform each player of their role
+    playerData.forEach((player, userId) => {
+        const client = connectedPlayers.get(userId);
+        if (client && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+                type: 'role_assigned',
+                role: player.role,
+                gameStartTime: gameState.startTime,
+                serverTime: Date.now()
+            }));
+        }
+    });
+}
+
+// Function to assign roles (1 impostor per 3 players)
+function assignRoles() {
+    const players = Array.from(playerData.keys());
+    const playerCount = players.length;
+    
+    // Calculate number of impostors (1 per 3 players)
+    const impostorCount = Math.max(1, Math.floor(playerCount / 3));
+    console.log(`Assigning ${impostorCount} impostors for ${playerCount} players`);
+    
+    // Shuffle players for random assignment
+    for (let i = players.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [players[i], players[j]] = [players[j], players[i]];
+    }
+    
+    // Assign roles
+    players.forEach((userId, index) => {
+        const player = playerData.get(userId);
+        if (index < impostorCount) {
+            player.role = 'impostor';
+        } else {
+            player.role = 'crewmate';
+        }
+        playerData.set(userId, player);
+    });
+}
+
+// Function to check win conditions
+function checkWinConditions() {
+    if (!gameState.gameInProgress) return false;
+    
+    let crewmateCount = 0;
+    let impostorCount = 0;
+    let alivePlayers = 0;
+    let connectedPlayers = 0;
+    
+    // Count players by role
+    playerData.forEach(player => {
+        // Skip disconnected players in the count
+        if (player.disconnected) return;
+        
+        // Count connected players
+        connectedPlayers++;
+        
+        if (player.isAlive) {
+            alivePlayers++;
+            if (player.role === 'crewmate') {
+                crewmateCount++;
+            } else if (player.role === 'impostor') {
+                impostorCount++;
+            }
+        }
+    });
+    
+    console.log(`Win check: ${crewmateCount} crewmates, ${impostorCount} impostors alive. ${gameState.completedTasks}/${gameState.totalTasks} tasks completed. ${connectedPlayers} connected players.`);
+    
+    // If no one is connected, don't trigger win condition
+    if (connectedPlayers === 0) {
+        return false;
+    }
+    
+    if (gameState.totalTasks > 0 && gameState.completedTasks >= gameState.totalTasks) {
+        endGame('crewmate', 'All tasks completed');
+        return true;
+    }
+    
+    if (crewmateCount === 0 && impostorCount === 0) {
+        endGame('crewmate', 'All players dead but ship is still intact');
+        return true;
+    }
+
+    if (crewmateCount === 0 && impostorCount > 0) {
+        endGame('impostor', 'All crewmates eliminated');
+        return true;
+    }
+    
+    // Win condition 3: Only one crewmate left - impostors win (falsely accused)
+    if (crewmateCount === 1 && alivePlayers === 1 && impostorCount === 0) {
+        endGame('crewmate', 'Last crewmate standing, the ship is intact');
+        return true;
+    }
+    
+    return false;
+}
+
+// Function to end the game
+function endGame(winnerRole, reason) {
+    console.log(`Game over! ${winnerRole} wins. Reason: ${reason}`);
+    
+    // Prepare player statistics for the game over message
+    const playerStats = Array.from(playerData.entries()).map(([id, player]) => ({
+        id: id,
+        role: player.role,
+        isAlive: player.isAlive,
+        kills: player.kills || 0,
+        completedTasks: player.completedTasks || 0
+    }));
+    
+    // Send game over message to all clients
+    const gameOverMessage = JSON.stringify({
+        type: 'game_over',
+        winner: winnerRole,
+        reason: reason,
+        playerRoles: Array.from(playerData.entries()).map(([id, player]) => ({
+            id: id,
+            role: player.role,
+            isAlive: player.isAlive
+        })),
+        playerStats: playerStats
+    });
+    
+    connectedPlayers.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(gameOverMessage);
+        }
+    });
+    
+    // Reset game state but keep players
+    gameState.gameInProgress = false;
+    gameState.countdownStarted = false;
+    if (gameState.countdownTimer) {
+        clearTimeout(gameState.countdownTimer);
+        gameState.countdownTimer = null;
+    }
+    gameState.completedTasks = 0;
+    gameState.totalTasks = 0;
+    
+    // Reset player roles to null for next game
+    playerData.forEach((player, userId) => {
+        player.role = null;
+        // Reset statistics
+        player.kills = 0;
+        player.completedTasks = 0;
+        playerData.set(userId, player);
+    });
+}
+
 // Handle WebSocket connections
 wss.on('connection', (ws, request) => {
     const userId = request.session.userId;
-    console.log(`Client connected: ${userId}`);
-
-    // Store userId with the WebSocket connection
-    ws.userId = userId;
+    console.log(`WebSocket connection established for user: ${userId}`);
     
-    // Add player to our tracking map
+    // Store the connection
     connectedPlayers.set(userId, ws);
     
-    // Initialize game start time if this is the first player
-    if (gameState.startTime === null && connectedPlayers.size === 1) {
-        gameState.startTime = Date.now();
-        gameState.safeZone.nextShrinkTime = gameState.startTime + gameState.safeZone.shrinkInterval;
-        console.log(`Game started at ${new Date(gameState.startTime).toISOString()}`);
-        console.log(`First safe zone shrink at ${new Date(gameState.safeZone.nextShrinkTime).toISOString()}`);
-        
-        // Set up safe zone shrinking interval
-        startSafeZoneShrinking();
-    }
-    
-    // Initialize player data with default values
+    // Initialize player data with null role
     playerData.set(userId, {
-        x: PLAYER_START_X, // Use constant
-        y: PLAYER_START_Y, // Use constant
+        x: PLAYER_START_X,
+        y: PLAYER_START_Y,
         width: PLAYER_WIDTH,
         height: PLAYER_HEIGHT,
-        direction: 'down',
-        frameX: 0,
-        isMoving: false,
+        isAlive: true,
         health: 100,
-        role: Math.random() < 0.2 ? 'impostor' : 'crewmate', // 20% chance to be impostor
-        isReported: false
+        role: null, // Initial role is null
+        isReported: false,
+        lastUpdated: Date.now(),
+        // Add statistics tracking
+        kills: 0,
+        completedTasks: 0,
+        killChance: 0 // Initialize kill chance to 0
     });
     
-    // Send welcome message with player's assigned role
-    ws.send(JSON.stringify({ 
-        type: 'welcome', 
-        message: `Welcome ${userId}!`,
+    // Send welcome message to the new player
+    ws.send(JSON.stringify({
+        type: 'welcome',
+        message: 'Welcome to StarScrap!',
         playerId: userId,
-        role: playerData.get(userId).role,
+        role: null, // Initial role is null
         gameStartTime: gameState.startTime,
         serverTime: Date.now()
     }));
@@ -624,6 +872,9 @@ wss.on('connection', (ws, request) => {
     
     // Broadcast updated player count to all clients
     broadcastPlayerCount();
+
+    // Check if we can start the game
+    checkGameStart();
 
     ws.on('message', (message) => {
         try {
@@ -671,11 +922,26 @@ wss.on('connection', (ws, request) => {
                     // Handle task completion
                     console.log(`Player ${userId} completed task: ${data.taskId}`);
                     
+                    // Update task counter
+                    gameState.completedTasks++;
+                    
+                    // Update player's task completion counter
+                    const playerCompleting = playerData.get(userId);
+                    if (playerCompleting) {
+                        playerCompleting.completedTasks = (playerCompleting.completedTasks || 0) + 1;
+                        playerData.set(userId, playerCompleting);
+                    }
+                    
+                    // Check win conditions
+                    checkWinConditions();
+                    
                     // Broadcast task completion to all clients
                     const taskMessage = JSON.stringify({
                         type: 'task_completed',
                         taskId: data.taskId,
-                        playerId: userId
+                        playerId: userId,
+                        completedTasks: gameState.completedTasks,
+                        totalTasks: gameState.totalTasks
                     });
                     
                     connectedPlayers.forEach(client => {
@@ -699,6 +965,16 @@ wss.on('connection', (ws, request) => {
                         
                         // Save updated player data
                         playerData.set(data.victim, victimData);
+                        
+                        // Increment killer's kill counter
+                        const killerData = playerData.get(userId);
+                        if (killerData) {
+                            killerData.kills = (killerData.kills || 0) + 1;
+                            playerData.set(userId, killerData);
+                        }
+                        
+                        // Check win conditions
+                        checkWinConditions();
                     }
                     
                     // Broadcast the kill to all clients
@@ -856,6 +1132,41 @@ wss.on('connection', (ws, request) => {
                     setTimeout(() => {
                         startReportMeeting(userId, data.deadPlayerId);
                     }, 3000);
+                    break;
+                
+                case 'set_total_tasks':
+                    // Set the total number of tasks that need to be completed
+                    console.log(`Setting total tasks: ${data.count}`);
+                    gameState.totalTasks = data.count;
+                    break;
+                
+                case 'item_pickup':
+                    // Handle item pickup
+                    console.log(`Player ${userId} picked up item ${data.itemId}`);
+                    
+                    // Update player's kill chance
+                    if (playerData.has(userId)) {
+                        const player = playerData.get(userId);
+                        player.killChance = data.killChance || player.killChance || 0;
+                        playerData.set(userId, player);
+                        
+                        // Broadcast the item pickup to all players
+                        const pickupMessage = JSON.stringify({
+                            type: 'item_pickup',
+                            playerId: userId,
+                            itemId: data.itemId,
+                            killChance: player.killChance
+                        });
+                        
+                        connectedPlayers.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(pickupMessage);
+                            }
+                        });
+                        
+                        // Broadcast updated player data
+                        broadcastPlayerData(userId);
+                    }
                     break;
                 
                 default:

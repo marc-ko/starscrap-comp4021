@@ -31,6 +31,7 @@ const Meeting = {
         this.createMeetingUI();
         // Create report UI
         this.createReportUI();
+
     },
 
     // Check if player is near meeting center
@@ -227,7 +228,7 @@ const Meeting = {
             // Add dead body info if this is a report
             if (data.deadPlayerId) {
                 const deadPlayerInfo = data.deadPlayerId.substring(24, 30);
-                callerInfoText += ` (Reported dead body: ${deadPlayerInfo})`;
+                callerInfoText += ` Reported dead body: ${deadPlayerInfo}`;
             }
             
             callerInfo.textContent = callerInfoText;
@@ -605,5 +606,11 @@ const Meeting = {
                 // Server will send meeting_start message
             }, 3000);
         }
+    },
+
+    // Create the meeting sound
+    createMeetingSound: function() {
+        const meetingSound = document.createElement('audio');
+        meetingSound.id = 'meeting-sound';
     }
 };

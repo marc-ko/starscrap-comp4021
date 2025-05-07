@@ -141,8 +141,18 @@ const Tasks = {
     
     // Initialize tasks
     init: function() {
-        this.state.totalTasks = this.definitions.filter(task => task.type !== 'crate').length;
+        // Count total tasks (including crates)
+        this.state.totalTasks = this.definitions.length;
         this.updateTaskProgressUI();
+        
+        // Send total task count to server
+        if (StarScrap && StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+            StarScrap.socket.send(JSON.stringify({
+                type: 'set_total_tasks',
+                count: this.state.totalTasks
+            }));
+        }
+        
         console.log('Tasks initialized. Total tasks:', this.state.totalTasks);
     },
     
@@ -1547,8 +1557,6 @@ const Tasks = {
         const taskIndex = this.definitions.findIndex(t => t.id === this.state.activeTaskId);
         if (taskIndex === -1) return;
         
-        
-        
         // Check if task has a trap deployed
         if (this.definitions[taskIndex].isStunDeployed) {
             console.log('Trap triggered on task:', this.definitions[taskIndex].name);
@@ -1565,18 +1573,8 @@ const Tasks = {
             return;
         }
         
-        // Mark as completed
-        this.definitions[taskIndex].completed = true;
-        
-        // Update task progress if it's not a crate
-        if (this.definitions[taskIndex].type !== 'crate') {
-            this.state.taskProgress++;
-            this.updateTaskProgressUI();
-        }
-       
-        
-        // Notify server about task completion
-        this.syncTaskCompletion(this.state.activeTaskId);
+        // Use the new completeTask function
+        this.completeTask(this.state.activeTaskId);
         
         // Close the task UI
         this.closeTaskUI();
@@ -1590,13 +1588,19 @@ const Tasks = {
         }
     },
     
-   
     // Sync task completion with server
     syncTaskCompletion: function(taskId) {
         if (StarScrap && StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+            // Find the task to get its type
+            const taskIndex = this.definitions.findIndex(t => t.id === taskId);
+            if (taskIndex === -1) return;
+            
+            const taskType = this.definitions[taskIndex].type;
+            
             StarScrap.socket.send(JSON.stringify({
                 type: 'task_completed',
                 taskId: taskId,
+                taskType: taskType,
                 playerId: Player ? Player.properties.id : null
             }));
         }
@@ -1644,7 +1648,7 @@ const Tasks = {
         
         // Calculate random stun duration between 1-6 seconds
         const stunDuration = Math.floor(Math.random() * 6) + 1;
-        console.log(`Trap triggered! Stunned for ${stunDuration} seconds`);
+        StarScrap.state.assets.stunSound.play();
         
         // Set player as stunned
         Player.properties.isStunned = true;
@@ -1728,5 +1732,42 @@ const Tasks = {
                 }
             }
         }, 1000);
+    },
+    
+    // Complete a task
+    completeTask: function(taskId) {
+        // Find the task
+        const taskIndex = this.definitions.findIndex(task => task.id === taskId);
+        if (taskIndex === -1) return false;
+        
+        // If already completed, do nothing
+        if (this.definitions[taskIndex].completed) return false;
+        
+        // Mark as completed
+        this.definitions[taskIndex].completed = true;
+        
+        // Increment progress (for all tasks including crates)
+        this.state.taskProgress++;
+        
+        // Update UI
+        this.updateTaskProgressUI();
+        
+        // Send completion to server
+        if (StarScrap && StarScrap.socket && StarScrap.socket.readyState === WebSocket.OPEN) {
+            StarScrap.socket.send(JSON.stringify({
+                type: 'task_completed',
+                taskId: taskId,
+                taskType: this.definitions[taskIndex].type
+            }));
+        }
+        
+        console.log(`Task ${taskId} completed! Progress: ${this.state.taskProgress}/${this.state.totalTasks}`);
+        
+        // Check if all tasks complete
+        if (this.state.taskProgress >= this.state.totalTasks) {
+            console.log('All tasks completed!');
+        }
+        
+        return true;
     }
 };
