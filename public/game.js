@@ -174,6 +174,42 @@ const StarScrap = {
         
         container.appendChild(waitingScreen);
         
+        const startGameButton = document.createElement('button');
+        startGameButton.id = 'start-game-button';
+        startGameButton.textContent = 'Start Game';
+        startGameButton.style.padding = '12px 24px';
+        startGameButton.style.backgroundColor = '#00FFFF';
+        startGameButton.style.color = '#000';
+        startGameButton.style.border = 'none';
+        startGameButton.style.borderRadius = '5px';
+        startGameButton.style.fontSize = '18px';
+        startGameButton.style.fontWeight = 'bold';
+        startGameButton.style.cursor = 'pointer';
+        startGameButton.style.marginTop = '20px';
+        startGameButton.style.boxShadow = '0 0 10px #00FFFF';
+        startGameButton.style.transition = 'all 0.2s';
+
+        startGameButton.onmouseover = function() {
+            this.style.backgroundColor = '#4FF2F2';
+            this.style.boxShadow = '0 0 15px #00FFFF';
+        };
+
+        startGameButton.onmouseout = function() {
+            this.style.backgroundColor = '#00FFFF';
+            this.style.boxShadow = '0 0 10px #00FFFF';
+        };
+
+        startGameButton.onclick = () => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.socket.send(JSON.stringify({
+                    type: 'request_game_start'
+                }));
+                startGameButton.disabled = true;
+                startGameButton.textContent = 'Starting...';
+            }
+        };
+
+        waitingScreen.appendChild(startGameButton);
         // Create loading indicator
         const loadingElement = document.createElement('h2');
         loadingElement.className = 'loading';
@@ -636,8 +672,8 @@ const StarScrap = {
         
         this.socket.onopen = () => {
             console.log('WebSocket connection opened');
-            this.socket.send(JSON.stringify({ type: 'player_join', message: 'New player joined!' }));
-            
+            this.socket.send(JSON.stringify({ type: 'player_join', message: 'Player joined' }));
+           
             // Show player count display after connection
             const playerCountDisplay = document.getElementById('player-count');
             if (playerCountDisplay) {
@@ -651,9 +687,33 @@ const StarScrap = {
         this.socket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log('Received socket message:', data.type);
+                console.log('Received socket message:', data);
                 
                 switch (data.type) {
+                
+                    case 'game_start_response':
+                    // Handle response to game start request
+                    if (data.success) {
+                        console.log('Game starting by player request');
+                    } else {
+                        console.log('Game start request failed:', data.message);
+                        // Re-enable the button
+                        const startButton = document.getElementById('start-game-button');
+                        if (startButton) {
+                            startButton.disabled = false;
+                            startButton.textContent = 'Start Game';
+                            
+                            // Show error message
+                            const waitingPlayerCount = document.getElementById('waiting-player-count');
+                            if (waitingPlayerCount) {
+                                waitingPlayerCount.textContent = data.message;
+                                setTimeout(() => {
+                                    waitingPlayerCount.textContent = `Players: ${this.state.playerCount}/${gameState.minPlayers} (Need at least ${gameState.minPlayers})`;
+                                }, 3000);
+                            }
+                        }
+                    }
+                    break;
                     case 'welcome':
                         console.log('Welcome message received:', data);
                         
@@ -674,7 +734,7 @@ const StarScrap = {
                         // Initialize player with role and ID from server
                         if (typeof Player !== 'undefined') {
                             // Initialize the player with server-provided role and ID
-                            const playerProps = Player.init(data.role, data.playerId);
+                            const playerProps = Player.init(data.role??"crewmate", data.playerId);
                             this.state.currentPlayer = playerProps;
                             
                             // Update camera to focus on the player
@@ -683,7 +743,7 @@ const StarScrap = {
                             // Show player info in UI
                             const playerName = document.getElementById('player-name');
                             if (playerName) {
-                                playerName.textContent = 'Player Name: ' + data.playerId.substring(24, 30);
+                                playerName.textContent = 'Player Name: ' + data.playerId;
                             }
                             
                             const playerRole = document.getElementById('player-role');
@@ -704,7 +764,7 @@ const StarScrap = {
                             }
                             
                             // Add this player to the waiting players list
-                            this.updateWaitingPlayersList(data.playerId.substring(24, 30), 'You');
+                            this.updateWaitingPlayersList(data.playerId, 'You');
                             
                             // We need to ensure our position is sent to the server multiple times
                             // to overcome potential initial sync issues
@@ -736,7 +796,7 @@ const StarScrap = {
                             
                             // Add player to waiting list if not already there
                             if (data.player && data.player.id) {
-                                this.updateWaitingPlayersList(data.player.id.substring(24, 30));
+                                this.updateWaitingPlayersList(data.player.id);
                             }
                         }
                         break;
@@ -746,7 +806,7 @@ const StarScrap = {
                             Player.removePlayer(data.playerId);
                             
                             // Remove from waiting players list
-                            this.removeFromWaitingPlayersList(data.playerId.substring(24, 30));
+                            this.removeFromWaitingPlayersList(data.playerId);
                         }
                         break;
                         
@@ -1086,7 +1146,7 @@ const StarScrap = {
         // Create game canvas and prepare to load assets
         if (this.createGameCanvas()) {
             // WebSocket connection will be established after assets are loaded
-            this.initSocket();
+           // this.initSocket();
             const container = document.querySelector('.container');
             if (container) {
                 container.style.backgroundImage = 'none';
@@ -1248,7 +1308,7 @@ const StarScrap = {
                     this.state.ctx.textAlign = 'center';
                     this.state.ctx.fillStyle = 'red';
                     this.state.ctx.fillText(
-                        `${id.substring(24, 30)} (DEAD)`, 
+                        `${id} (DEAD)`, 
                         screenX + 20, 
                         screenY - 5
                     );
@@ -1483,7 +1543,7 @@ const StarScrap = {
         const impostorMVPName = document.createElement('div');
         impostorMVPName.style.fontSize = '20px';
         impostorMVPName.style.fontWeight = 'bold';
-        impostorMVPName.textContent = topKiller.id !== 'None' ? topKiller.id.substring(24, 30) : 'None';
+        impostorMVPName.textContent = topKiller.id !== 'None' ? topKiller.id : 'None';
         
         const impostorMVPKills = document.createElement('div');
         impostorMVPKills.textContent = `Kills: ${topKiller.kills}`;
@@ -1509,7 +1569,7 @@ const StarScrap = {
         const crewmateMVPName = document.createElement('div');
         crewmateMVPName.style.fontSize = '20px';
         crewmateMVPName.style.fontWeight = 'bold';
-        crewmateMVPName.textContent = topTaskCompleter.id !== 'None' ? topTaskCompleter.id.substring(24, 30) : 'None';
+        crewmateMVPName.textContent = topTaskCompleter.id !== 'None' ? topTaskCompleter.id : 'None';
         
         const crewmateMVPTasks = document.createElement('div');
         crewmateMVPTasks.textContent = `Tasks: ${topTaskCompleter.tasks}`;
@@ -1555,7 +1615,7 @@ const StarScrap = {
                 
                 // Player name
                 const playerCell = document.createElement('td');
-                playerCell.textContent = player.id.substring(24, 30);
+                playerCell.textContent = player.id;
                 playerCell.style.padding = '12px';
                 
                 // Highlight current player
@@ -1611,7 +1671,7 @@ const StarScrap = {
                 
                 // Player name
                 const playerCell = document.createElement('td');
-                playerCell.textContent = player.id.substring(24, 30);
+                playerCell.textContent = player.id;
                 playerCell.style.padding = '12px';
                 
                 // Role

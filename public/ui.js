@@ -19,7 +19,7 @@ const SignInForm = (function () {
             Authentication.signin(username, password,
                 () => {
                     hide();
-                    
+                    StarScrap.initSocket();
                 },
                 (error) => { $("#signin-message").text(error); }
             );

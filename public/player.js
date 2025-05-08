@@ -67,10 +67,14 @@ const Player = {
         });
 
         const playerName = document.getElementById("player-name");
-        playerName.textContent = id;
+        if (playerName) {
+            playerName.textContent = id;
+        }
 
         const playerRole = document.getElementById("player-role");
-        playerRole.textContent = role;
+        if (playerRole) {
+            playerRole.textContent = role;
+        }
         
         // Force an immediate sync to server if we have an ID
         if (id) {
@@ -630,7 +634,7 @@ const Player = {
 
         console.log('crewkillingProbability',(Math.random()*1));
         
-        if(this.properties.role === 'crewmate' && (Math.random()*100) < crewkillingProbability*100){
+        if(this.properties.role === 'crewmate' && (Math.random()*100) >= crewkillingProbability*100){
 
 
             // Show failure notification

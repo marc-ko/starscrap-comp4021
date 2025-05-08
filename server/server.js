@@ -5,6 +5,7 @@ const WebSocket = require('ws');
 const path = require('path');
 const bcrypt = require("bcrypt");
 const fs = require("fs");
+const { connect } = require('http2');
 // Player constants
 const PLAYER_HEIGHT = 50;
 const PLAYER_WIDTH = 37;
@@ -78,10 +79,17 @@ app.post("/signin", (req, res) => {
         
         return res.json({ status: "error", error: "Invalid password." });;
     }
+    console.log("User found:", connectedPlayers);
+    if(connectedPlayers.has(username)) {
+        return res.json({ status: "error", error: "User already connected." });
+    }
     else {
         req.session.user = users[username];
         console.log("User signed in:", req.session.user);
+
+        connectedPlayers.set(username,null);
         res.json({ status: "success", user: JSON.stringify(users[username]) });
+        
         return;
     }
    
@@ -114,6 +122,7 @@ const wss = new WebSocket.Server({ noServer: true });
 // Player tracking
 const connectedPlayers = new Map(); // userId -> websocket connection
 const playerData = new Map(); // userId -> player data (position, health, etc.)
+const connectednames = []; // userId -> player name
 let safeZoneTimer = null;
 
 // Game state
@@ -156,7 +165,14 @@ server.on('upgrade', (request, socket, head) => {
     sessionParser(request, {}, () => {
         if (!request.session.userId) {
             // Generate a unique user ID for the session if it doesn't exist
-            request.session.userId = `nicolelam_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            if (request.session.user && request.session.user.username) {
+        request.session.userId = request.session.user.username;
+        console.log(`Set userId to username: ${request.session.userId}`);
+        } else {
+        // fallback if not signed in
+        request.session.userId = `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        console.log(`No username found, generated guest userId: ${request.session.userId}`);
+        }
             console.log(`Generated new userId: ${request.session.userId}`);
         } else {
             console.log(`Existing userId found: ${request.session.userId}`);
@@ -179,9 +195,11 @@ function broadcastPlayerCount() {
         type: 'player_count',
         count: count
     });
-
+        console.log("sending player count to client", connectedPlayers);
     connectedPlayers.forEach((client) => {
+        
         client.send(message);
+
     });
 
     // Check if there are no players connected
@@ -259,14 +277,12 @@ function resetServerState() {
 function broadcastPlayerData(sourceUserId) {
     // Get the player data that needs to be broadcasted
     const player = playerData.get(sourceUserId);
+     const playerWithId = { ...player, id: sourceUserId }; // Add id property
     if (!player) return;
 
     const message = JSON.stringify({
         type: 'player_update',
-        player: {
-            ...player,
-            id: sourceUserId
-        }
+        player: playerWithId 
     });
 
     console.log("broadcasting player data to all clients", message);
@@ -687,8 +703,8 @@ function checkGameStart() {
 
     // Need minimum 3 players to start
     if (playerCount >= gameState.minPlayers) {
-        console.log(`We have ${playerCount} players, starting game countdown!`);
-        startGameCountdown();
+        //console.log(`We have ${playerCount} players, starting game countdown!`);
+        //startGameCountdown();
     } else {
         console.log(`Need ${gameState.minPlayers} players to start, currently have ${playerCount}`);
     }
@@ -898,6 +914,7 @@ wss.on('connection', (ws, request) => {
     console.log(`WebSocket connection established for user: ${userId}`);
 
     // Store the connection
+    connectedPlayers.delete(userId); // Remove any existing connection
     connectedPlayers.set(userId, ws);
 
     // Initialize player data with null role
@@ -922,7 +939,7 @@ wss.on('connection', (ws, request) => {
         type: 'welcome',
         message: 'Welcome to StarScrap!',
         playerId: userId,
-        role: null, // Initial role is null
+        role: "crewmate", // Initial role is null
         gameStartTime: gameState.startTime,
         serverTime: Date.now()
     }));
@@ -962,6 +979,7 @@ wss.on('connection', (ws, request) => {
 
             // Handle different message types
             switch (data.type) {
+
                 case 'get_player_count':
                     // Send current player count to the requesting client
                     ws.send(JSON.stringify({
@@ -1092,6 +1110,41 @@ wss.on('connection', (ws, request) => {
                         console.log(`Non-impostor ${userId} tried to set trap, ignored`);
                     }
                     break;
+                
+                case 'request_game_start':
+                // Only allow game start if we have enough players
+                if (connectedPlayers.size >= gameState.minPlayers) {
+                    console.log(`Game start requested by ${userId}`);
+                    
+                    // Check if game is already in progress or countdown started
+                    if (gameState.gameInProgress || gameState.countdownStarted) {
+                        console.log('Game already in progress or starting, ignoring request');
+                        ws.send(JSON.stringify({
+                            type: 'game_start_response',
+                            success: false,
+                            message: 'Game already in progress'
+                        }));
+                        break;
+                    }
+                    
+                    // Start the game countdown
+                    startGameCountdown();
+                    
+                    // Send confirmation to the requesting client
+                    ws.send(JSON.stringify({
+                        type: 'game_start_response',
+                        success: true,
+                        message: 'Game starting'
+                    }));
+                } else {
+                    // Not enough players
+                    ws.send(JSON.stringify({
+                        type: 'game_start_response',
+                        success: false,
+                        message: `Need at least ${gameState.minPlayers} players to start`
+                    }));
+                }
+                break;
 
                 case 'call_meeting':
                     // Handle meeting request
