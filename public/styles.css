@@ -271,6 +271,20 @@ body::before {
     color: #ffffff;
 }
 
+.guide-container {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.6);
+    padding: 10px;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    box-shadow: 0 0 10px #ffffff;
+    color: #ffffff;
+}
+
 /* Game container when playing */
 .container.game-active {
     padding: 0;
