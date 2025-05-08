@@ -47,6 +47,44 @@ body::before {
     text-align: center;
 }
 
+/* Sign-in Overlay */
+#signin-overlay {
+    position: fixed;
+    top: 50%;
+    left: 30%;
+    width: 50%;
+    height: 50%;
+
+    transform: translate(-50%, -50%);
+    background: rgba(76, 73, 255, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    width: 500px;
+    height: 500px;
+    align-self: stretch;
+    /* Optional: Add a semi-transparent background */
+    z-index: 1000;
+    /* Ensure it appears above other elements */
+}
+
+#register-form {
+    position: fixed;
+    top: 0%;
+    left: 120%;
+    background: rgba(76, 73, 255, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    width: 500px;
+    height: 500px;
+    align-self: stretch;
+}
+
+#signin-overlay.hidden {
+    display: none;
+}
+
 /* Front Page Elements */
 .game-title {
     font-size: 4rem;

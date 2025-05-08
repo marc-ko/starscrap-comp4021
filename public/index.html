@@ -20,10 +20,33 @@
 
 <body>
     <!-- Player Count - Initially hidden, shown after connection -->
-    <div id="player-count" class="player-count">
-        <span class="player-icon">👤</span> <span id="count">0</span>
-    </div>
+    <div id="signin-overlay" class="overlay row">
+        <div class="content shadow row">
+            <form id="signin-form" class="col">
+                <div class="caption">SIGN IN WITH YOUR ACCOUNT</div>
+                <div class="spacer-0"></div>
+                <input id="signin-username" placeholder="Enter your username"></input>
+                <input id="signin-password" type="password" placeholder="Enter your password"></input>
+                <div class="spacer-0"></div>
+                <button type="submit">Sign In</button>
+                <div id="signin-message" class="warning center"></div>
+                <div class="spacer-grow"></div>
+            </form>
 
+            <div class="spacer-0"></div>
+
+            <form id="register-form" class="col">
+                <div class="caption">OR, REGISTER</div>
+                <div class="spacer-0"></div>
+                <input id="register-username" maxlength="10" placeholder="Enter your username"></input>
+                <input id="register-password" type="password" placeholder="Enter your password"></input>
+                <input id="register-confirm" type="password" placeholder="Enter your password again"></input>
+                <div class="spacer-0"></div>
+                <button type="submit">Register</button>
+                <div id="register-message" class="warning center"></div>
+            </form>
+        </div>
+    </div>
 
     <div class="container">
         <h1 class="game-title">STARSCRAP</h1>
@@ -38,7 +61,12 @@
         </div>
         <button class="start-button" id="start-button">START GAME</button>
     </div>
+    <!--login Scripts-->
 
+   
+    <script src ="authentication.js"></script>
+    <script src ="registration.js"></script>
+    <script src="ui.js"></script>
     <!-- Game Scripts -->
     <script src="mapBoundData.js"></script>
     <script src="mapBound.js"></script>
@@ -47,6 +75,12 @@
     <script src="player.js"></script>
     <script src="meeting.js"></script>
     <script src="game.js"></script>
+    <script>
+        $(function () {
+            // Initialize the UI
+            SignInForm.initialize();
+            });
+        </script>
 </body>
 
 </html>
