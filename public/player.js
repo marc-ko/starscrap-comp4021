@@ -1,3 +1,5 @@
+
+
 /**
  * StarScrap - Player Module
  * Handles player functionality: rendering, movement, actions
@@ -624,7 +626,7 @@ const Player = {
 
         
         if(this.properties.role !== 'impostor' && this.properties.killChance === 0){
-            alert('You have NO weapon to do this');
+            StarScrap.showGameMessage('You have NO weapon to do this','error');
             return false;
         }
         
@@ -669,7 +671,7 @@ const Player = {
 
 
         if(this.properties.lastKillTime && Date.now() - this.properties.lastKillTime < 30000 && !(this.properties.role == 'crewmate' && usingKillChance)){
-            alert('You must wait 30 seconds before you can kill again');
+            StarScrap.showGameMessage('You must wait 30 seconds before you can kill again','error');
             return false;
         }
         
@@ -678,7 +680,7 @@ const Player = {
             const gameTimeElapsed = Date.now() - StarScrap.state.gameStartTime;
             console.log('gameTimeElapsed',gameTimeElapsed);
             if (gameTimeElapsed < 60000) { // 60000ms = 1 minute
-                alert('Killing is not available yet. Wait for 1 minute after game start.');
+                StarScrap.showGameMessage('Killing is not available yet. Wait for 1 minute after game start.','error');
                 return false;
             }
         }

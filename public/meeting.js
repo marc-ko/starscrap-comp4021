@@ -57,19 +57,19 @@ const Meeting = {
     callMeeting: function () {
         // Only living players can call meetings
         if (!Player.properties.isAlive) {
-            alert('Dead players cannot call meetings');
+            this.showGameMessage('Dead players cannot call meetings','error');
             return false;
         }
 
         // Check if player is near meeting center
         if (!this.isNearMeetingCenter()) {
-            alert('You need to be in the central area to call a meeting');
+            this.showGameMessage('You need to be in the central area to call a meeting','error');
             return false;
         }
 
         // Check if meeting is already active
         if (this.state.isMeetingActive) {
-            alert('A meeting is already in progress');
+            this.showGameMessage('A meeting is already in progress','error');
             return false;
         }
 
@@ -336,13 +336,13 @@ const Meeting = {
     voteFor: function (targetId) {
         // Can't vote if voting is disabled
         if (!this.state.votingEnabled) {
-            alert('Voting has ended');
+            showGameMessage('Voting has ended','error');
             return;
         }
 
         // Can't vote if dead
         if (!Player.properties.isAlive) {
-            alert('Dead players cannot vote');
+            showGameMessage('Dead players cannot vote','error');
             return;
         }
 

@@ -847,6 +847,12 @@ function checkWinConditions() {
         return true;
     }
 
+    if(impostorCount === 0 && alivePlayers > 0) {
+        endGame('crewmate', 'All impostors eliminated, crewmates win!');
+        return true;
+
+
+    }
     // Win condition 3: Only one crewmate left - impostors win (falsely accused)
     if (crewmateCount === 1 && alivePlayers === 1 && impostorCount === 0) {
         endGame('crewmate', 'Last crewmate standing, the ship is intact');

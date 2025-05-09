@@ -71,8 +71,9 @@ const StarScrap = {
     loader: {
         assetsToLoad: 0,
         assetsLoaded: 0,
+    
 
-
+          
         checkAllAssetsLoaded: function() {
             const loadingElement = document.getElementById('loading-progress');
             if (loadingElement) {
@@ -419,15 +420,16 @@ const StarScrap = {
                                     }));
                                     this.state.assets.trapSetSound.play();
                                     // Show feedback to player
-                                    alert('Trap set on ' + nearbyTask.name + '!');
+                                    this.showGameMessage('Trap set on ' + nearbyTask.name + '!', 'success');
                                 }
                             } else {
                                 console.log('No task nearby to set trap on');
-                                alert('No task nearby to set trap on. Get closer to a task.');
+                                this.showGameMessage('No task nearby to set trap on. Get closer to a task.', 'error');
                             }
                         }
                     } else if (Player.properties && Player.properties.role !== 'impostor') {
                         console.log('Only impostors can set traps');
+                        this.showGameMessage('Only impostors can set traps.', 'error');
                     }
                     break;
                 // Debug controls
@@ -1803,6 +1805,40 @@ const StarScrap = {
         // Add to list
         playersList.appendChild(playerEntry);
     },
+    
+    showGameMessage: function(message, type = 'info') {
+    const messageContainer = document.createElement('div');
+    messageContainer.className = `game-message ${type}`;
+    messageContainer.textContent = message;
+
+    // Style the message
+    messageContainer.style.position = 'absolute';
+    messageContainer.style.bottom = '20px';
+    messageContainer.style.left = '50%';
+    messageContainer.style.transform = 'translateX(-50%)';
+    messageContainer.style.backgroundColor = type === 'success' ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
+    messageContainer.style.color = 'white';
+    messageContainer.style.padding = '10px 20px';
+    messageContainer.style.borderRadius = '5px';
+    messageContainer.style.fontWeight = 'bold';
+    messageContainer.style.zIndex = '1000';
+    messageContainer.style.textAlign = 'center';
+    messageContainer.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
+    messageContainer.style.transition = 'opacity 0.5s ease';
+
+    // Add to the document
+    document.body.appendChild(messageContainer);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        messageContainer.style.opacity = '0';
+        setTimeout(() => {
+            if (messageContainer.parentNode) {
+                messageContainer.parentNode.removeChild(messageContainer);
+            }
+        }, 500);
+    }, 3000);
+    },
 
     // Remove player from waiting list
     removeFromWaitingPlayersList: function(playerIdShort) {
@@ -1846,3 +1882,4 @@ const StarScrap = {
 document.addEventListener('DOMContentLoaded', () => {
     StarScrap.init();
 }); 
+ 

@@ -282,7 +282,7 @@ const Tasks = {
     interactWithNearbyTask: function() {
         // Check if player is impostor - impostors cannot complete tasks
         if (Player && Player.properties && Player.properties.role === 'impostor') {
-            alert('Impostors cannot complete tasks!');
+            StarScrap.showGameMessage('Impostors cannot complete tasks!','error');
             return false;
         }
 
@@ -1286,7 +1286,7 @@ const Tasks = {
                     }
                     
                     // Show alert
-                    alert('Wrong code! ARE YOU Dyslexia? Oxygen levels dangerously low. You have been damaged!');
+                StarScrap.showGameMessage('Wrong code! ARE YOU Dyslexia? Oxygen levels dangerously low. You have been damaged!','error');
                     
                     // Clear the input
                     currentCode = '';
