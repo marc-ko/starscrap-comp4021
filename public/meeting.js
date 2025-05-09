@@ -336,13 +336,13 @@ const Meeting = {
     voteFor: function (targetId) {
         // Can't vote if voting is disabled
         if (!this.state.votingEnabled) {
-            showGameMessage('Voting has ended','error');
+            StarScrap.showGameMessage('Voting has ended','error');
             return;
         }
 
         // Can't vote if dead
         if (!Player.properties.isAlive) {
-            showGameMessage('Dead players cannot vote','error');
+            StarScrap.showGameMessage('Dead players cannot vote','error');
             return;
         }
 
