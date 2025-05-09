@@ -57,19 +57,19 @@ const Meeting = {
     callMeeting: function () {
         // Only living players can call meetings
         if (!Player.properties.isAlive) {
-            this.showGameMessage('Dead players cannot call meetings','error');
+            StarScrap.showGameMessage('Dead players cannot call meetings','error');
             return false;
         }
 
         // Check if player is near meeting center
         if (!this.isNearMeetingCenter()) {
-            this.showGameMessage('You need to be in the central area to call a meeting','error');
+            StarScrap.showGameMessage('You need to be in the central area to call a meeting','error');
             return false;
         }
 
         // Check if meeting is already active
         if (this.state.isMeetingActive) {
-            this.showGameMessage('A meeting is already in progress','error');
+            StarScrap.showGameMessage('A meeting is already in progress','error');
             return false;
         }
 
