@@ -296,7 +296,7 @@ const Player = {
                 if (safePlayer.id) {
                     ctx.font = '10px Arial';
                     ctx.fillStyle = 'red';
-                    ctx.fillText(`${safePlayer.id.substring(24, 30)} (DEAD)`, 
+                    ctx.fillText(`${safePlayer.id} (DEAD)`, 
                         deadX - cameraX, 
                         deadY - cameraY - 3);
                 }
@@ -370,7 +370,7 @@ const Player = {
             if (safePlayer.id && safePlayer.id !== this.properties.id) {
                 ctx.font = '10px Arial';
                 ctx.fillStyle = 'white';
-                ctx.fillText(safePlayer.id.substring(24, 30), 
+                ctx.fillText(safePlayer.id, 
                     safePlayer.x - cameraX, 
                     safePlayer.y - cameraY - 3);
             }

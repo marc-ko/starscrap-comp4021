@@ -1146,7 +1146,10 @@ const StarScrap = {
         // Create game canvas and prepare to load assets
         if (this.createGameCanvas()) {
             // WebSocket connection will be established after assets are loaded
+
            // this.initSocket();
+           this.socket.send(JSON.stringify({ type: 'In_Game', message: 'Player joined' }));
+           
             const container = document.querySelector('.container');
             if (container) {
                 container.style.backgroundImage = 'none';

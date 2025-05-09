@@ -285,12 +285,12 @@ function broadcastPlayerData(sourceUserId) {
         player: playerWithId 
     });
 
-    console.log("broadcasting player data to all clients", message);
+   // console.log("broadcasting player data to all clients", message);
 
     // Send to all clients
     connectedPlayers.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
-            console.log("sending player update to client", client.userId);
+            //console.log("sending player update to client", client.userId);
             client.send(message);
         } else {
             console.log("Client not ready, skipping update for", client.userId);
@@ -503,9 +503,9 @@ function startMeeting(callerId) {
 
     // Get players list to send to clients
     const players = [];
-    playerData.forEach((player, id) => {
+    playerData.forEach((player, userId) => {
         players.push({
-            id: id,
+            id: userId,
             isAlive: player.isAlive !== false,
             role: player.role
         });
@@ -908,6 +908,7 @@ function endGame(winnerRole, reason) {
     });
 }
 
+
 // Handle WebSocket connections
 wss.on('connection', (ws, request) => {
     const userId = request.session.userId;
@@ -919,6 +920,7 @@ wss.on('connection', (ws, request) => {
 
     // Initialize player data with null role
     playerData.set(userId, {
+        Ingame: false,
         x: PLAYER_START_X,
         y: PLAYER_START_Y,
         width: PLAYER_WIDTH,
@@ -979,7 +981,14 @@ wss.on('connection', (ws, request) => {
 
             // Handle different message types
             switch (data.type) {
-
+                case 'In_Game':
+                    // Update player data to indicate they are in the game
+                    if (playerData.has(userId)) {
+                        const player = playerData.get(userId);
+                        player.Ingame = true;
+                        playerData.set(userId, player);
+                    }
+                    break;
                 case 'get_player_count':
                     // Send current player count to the requesting client
                     ws.send(JSON.stringify({
@@ -1113,6 +1122,22 @@ wss.on('connection', (ws, request) => {
                 
                 case 'request_game_start':
                 // Only allow game start if we have enough players
+                let totalPlayers = 0;
+                playerData.forEach((player, id) => {
+                    if (player.Ingame){
+                        totalPlayers++;
+                    }
+                });
+                console.log(`Game start requested by ${userId}. Total players: ${totalPlayers}`);
+                if(totalPlayers < gameState.minPlayers) {
+                    console.log(`Not enough players to start game: ${totalPlayers}/${gameState.minPlayers}`);
+                    ws.send(JSON.stringify({
+                        type: 'game_start_response',
+                        success: false,
+                        message: `Need at least ${gameState.minPlayers} players to start`
+                    }));
+                    break;
+                }
                 if (connectedPlayers.size >= gameState.minPlayers) {
                     console.log(`Game start requested by ${userId}`);
                     
